@@ -1,12 +1,11 @@
-
 #enpc-panel {
     position: fixed;
     z-index: 3500;
     top: 72px;
     right: 10px;
-    min-width: 420px;
-    min-height: 190px;
-    max-width: min(980px, 96vw);
+    min-width: 460px;
+    min-height: 240px;
+    max-width: min(1100px, 96vw);
     max-height: 90vh;
     resize: both;
     overflow: hidden;
@@ -16,7 +15,7 @@
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 94%, transparent);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 11px;
-    box-shadow: 0 12px 40px rgba(0,0,0,.42);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .42);
     backdrop-filter: blur(12px);
 }
 
@@ -69,7 +68,7 @@
     border: 0;
     border-radius: 7px;
     color: inherit;
-    background: rgba(255,255,255,.08);
+    background: rgba(255, 255, 255, .08);
     cursor: pointer;
 }
 
@@ -78,7 +77,7 @@
     padding: 2px 7px;
     border-radius: 999px;
     text-align: center;
-    background: rgba(255,255,255,.1);
+    background: rgba(255, 255, 255, .1);
 }
 
 .enpc-body {
@@ -98,8 +97,13 @@
 .enpc-columns,
 .enpc-row {
     display: grid;
-    grid-template-columns: 42px minmax(90px, .9fr) minmax(105px, 1fr) minmax(150px, 1.6fr) auto;
-    gap: 6px;
+    grid-template-columns:
+        52px
+        minmax(110px, .95fr)
+        minmax(120px, 1fr)
+        minmax(190px, 1.8fr)
+        24px;
+    gap: 8px;
     align-items: center;
 }
 
@@ -116,15 +120,15 @@
     min-height: 0;
     flex: 1;
     overflow: auto;
-    border-top: 1px solid rgba(255,255,255,.04);
-    border-bottom: 1px solid rgba(255,255,255,.04);
+    border-top: 1px solid rgba(255, 255, 255, .04);
+    border-bottom: 1px solid rgba(255, 255, 255, .04);
 }
 
 .enpc-row {
     width: 100%;
-    padding: 8px 7px;
+    padding: 9px 7px;
     border: 0;
-    border-bottom: 1px solid rgba(255,255,255,.06);
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
     color: inherit;
     background: transparent;
     text-align: left;
@@ -132,7 +136,7 @@
 }
 
 .enpc-row:hover {
-    background: rgba(255,255,255,.07);
+    background: rgba(255, 255, 255, .07);
 }
 
 .enpc-status {
@@ -145,7 +149,7 @@
 }
 
 .enpc-name,
-.enpc-relation,
+.enpc-relationship,
 .enpc-summary {
     min-width: 0;
     overflow: hidden;
@@ -153,12 +157,12 @@
     white-space: nowrap;
 }
 
-.enpc-relation {
-    opacity: .82;
+.enpc-relationship {
+    opacity: .84;
 }
 
 .enpc-summary {
-    opacity: .75;
+    opacity: .76;
     font-size: .92em;
 }
 
@@ -168,7 +172,7 @@
 }
 
 .enpc-empty {
-    padding: 26px 8px;
+    padding: 28px 8px;
     text-align: center;
     opacity: .65;
 }
@@ -191,11 +195,11 @@
     display: grid;
     place-items: center;
     padding: 15px;
-    background: rgba(0,0,0,.66);
+    background: rgba(0, 0, 0, .66);
 }
 
 .enpc-modal {
-    width: min(470px, 96vw);
+    width: min(500px, 96vw);
     max-height: 90vh;
     overflow-y: auto;
     display: flex;
@@ -206,7 +210,7 @@
     background: var(--SmartThemeBlurTintColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 12px;
-    box-shadow: 0 18px 60px rgba(0,0,0,.5);
+    box-shadow: 0 18px 60px rgba(0, 0, 0, .5);
 }
 
 .enpc-modal h3 {
@@ -217,6 +221,12 @@
     margin-top: 4px;
     font-size: .8rem;
     opacity: .78;
+}
+
+.enpc-modal textarea {
+    width: 100%;
+    min-height: 78px;
+    resize: vertical;
 }
 
 .enpc-check {
@@ -234,16 +244,21 @@
     margin-top: 11px;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 760px) {
     #enpc-panel {
-        min-width: 320px;
+        min-width: 350px;
         max-width: calc(100vw - 12px);
-        max-height: 75vh;
+        max-height: 78vh;
     }
-}
 
-.enpc-modal textarea {
-    width: 100%;
-    resize: vertical;
-    min-height: 72px;
+    .enpc-columns,
+    .enpc-row {
+        grid-template-columns:
+            42px
+            minmax(90px, .9fr)
+            minmax(100px, 1fr)
+            minmax(130px, 1.3fr)
+            20px;
+        gap: 5px;
+    }
 }

@@ -1,57 +1,40 @@
 # Encountered NPCs for SillyTavern
 
-A compact universal NPC tracker with four simple columns:
+A compact universal character tracker for SillyTavern.
+
+## Layout
 
 **Status · Name · Relationship · Summary**
 
-## Version 0.3.0
+Example:
 
-- Added a short Summary field.
-- Main panel now shows Status, Name, Relationship, and Summary.
-- Add/Edit window includes Summary.
-- Search now includes summaries.
-- Model analysis now requests short summaries.
-- Fallback chat scanning creates a basic summary when the model returns no usable list.
-- Keeps the draggable and resizable panel from v0.2.x.
-- Keeps the plain-HTTP save fix.
-
-## Install
-
-In SillyTavern:
-
-1. Open **Extensions**.
-2. Choose **Install Extension**.
-3. Paste:
-
-   `https://github.com/rztyle/Encountered-NPCs`
-
-4. Install and hard-refresh.
-
-## Update your Git repository
-
-Replace the files in your local repository, then run:
-
-```fish
-cd ~/Projects/Encountered-NPCs
-git add .
-git commit -m "Add NPC summary column"
-git push
+```text
+😊  Bai Lian   Friend   Playful fox princess who trusts Yuan.
+👑  Aunt Yue   Aunt     Yuan's protective aunt and guardian.
+🎓  Mu Xian    Master   Sword master of the Azure Dragon Sect.
 ```
 
-Then in SillyTavern click **Update** for Encountered NPCs and hard-refresh with `Ctrl + Shift + R`.
+## Version 1.0.0
 
-## Usage
+- Rewritten character storage and UI logic.
+- Added a working Summary field.
+- Added Summary to the main table.
+- Added Summary to the Add/Edit window.
+- Search checks Name, Relationship, and Summary.
+- AI analysis requests structured JSON with summaries.
+- Existing v0.2/v0.3 local data is migrated automatically.
+- Keeps draggable, resizable, remembered panel position.
+- Keeps support for plain HTTP SillyTavern installations.
 
-- Drag the title bar to move the panel.
-- Resize from the lower-right edge.
-- Press **＋** to add an NPC.
-- Click a row to edit Status, Name, Relationship, Summary, or Lock.
-- Press **Analyze now** to scan the roleplay.
-- Press **⌖** to reset panel position and size.
+## Install or update
 
-## Data format
+Install from:
 
-Each NPC stores:
+`https://github.com/rztyle/Encountered-NPCs`
+
+After updating the GitHub repository, use SillyTavern's extension Update button and hard-refresh with `Ctrl + Shift + R`.
+
+## Stored character format
 
 ```json
 {
@@ -62,5 +45,3 @@ Each NPC stores:
   "locked": false
 }
 ```
-
-Summary is limited to 120 characters.
