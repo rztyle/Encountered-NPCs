@@ -1,71 +1,53 @@
-
 # Encountered NPCs for SillyTavern
 
-A compact, universal NPC relationship tracker.
-
-The panel intentionally shows only:
+A compact universal NPC tracker displaying only:
 
 **Status · Name · Relationship**
 
-Example:
+## Version 0.2.0
 
-- ❤️ Bai Lian — Romance
-- 😊 Ling Xi — Friend
-- 👑 Mei — Mother
-- 🎓 Mu Xian — Master
-- ⚔️ Zhao Tian — Enemy
+- Fixed manual Add and Save using dependable browser-local storage.
+- Added draggable title bar.
+- Added resizable panel.
+- Remembers panel position and size.
+- Added a reset-position button.
+- Made model output parsing tolerate JSON, fenced JSON, and simple text rows.
+- Automatic analysis is manual by default to avoid repeated errors and extra generations.
+- Keeps separate NPC data for each chat.
 
-## Features
+## Install
 
-- Compact floating right-side panel
-- One row per encountered NPC
-- Per-chat storage using SillyTavern chat metadata
-- Automatic relationship updates using a quiet background LLM analysis
-- Manual Add / Edit / Delete
-- Relationship lock to stop automatic changes
-- Search
-- Import/export JSON
-- Mobile-friendly collapsed mode
+In SillyTavern:
 
-## Installation
+1. Open **Extensions**.
+2. Choose **Install Extension**.
+3. Paste:
 
-### Recommended: Git repository
+   `https://github.com/rztyle/Encountered-NPCs`
 
-1. Put these files in a GitHub repository.
-2. In SillyTavern open **Extensions → Install Extension**.
-3. Paste the repository URL.
-4. Reload SillyTavern.
+4. Install and hard-refresh the page.
 
-### Manual server-wide install
+## Update an existing local clone
 
-Copy the `Encountered-NPCs` folder into:
+Replace `index.js`, `style.css`, `manifest.json`, and `README.md`, then run:
 
-`SillyTavern/public/scripts/extensions/third-party/`
+```bash
+git add .
+git commit -m "Fix saving, parsing, and add movable panel"
+git push
+```
 
-Then restart or reload SillyTavern.
+In SillyTavern, open Extensions and select **Update** for Encountered NPCs, then hard-refresh.
 
-For newer user-scoped installations, SillyTavern may store installed extensions beneath the user's data directory instead. Installing through the Extensions menu is preferred.
+## Usage
 
-## Automatic analysis
+- Drag the title bar to move the panel.
+- Drag the lower-right edge to resize it.
+- Press **＋** to manually add an NPC.
+- Click an NPC row to edit, lock, or delete it.
+- Use **Analyze now** for model-assisted detection.
+- Press **⌖** to reset panel position and size.
 
-Automatic analysis is enabled by default. After an AI reply, the extension makes one quiet background generation and asks the current model to return a JSON NPC list.
+## Storage
 
-Use the gear button to:
-
-- disable automatic analysis
-- analyze every 1, 2, 3, 5, or 10 replies
-- change how many recent messages are examined
-
-The **Analyze now** button runs it manually.
-
-## Important behavior
-
-- Only named NPCs encountered in the story should be added.
-- The relationship changes only when the recent story clearly supports it.
-- Locked rows cannot be changed by automatic analysis.
-- Automatic quality depends on the connected model.
-- The extension does not require a server plugin.
-
-## Version
-
-0.1.0 MVP
+Version 0.2.0 uses browser `localStorage`, separated by chat. This fixes the save failure seen with chat metadata on some SillyTavern builds. Browser storage means the list is tied to that browser/profile unless exported in a later version.

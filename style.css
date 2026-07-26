@@ -1,25 +1,38 @@
 
 #enpc-panel {
     position: fixed;
-    z-index: 3000;
-    top: 64px;
+    z-index: 3500;
+    top: 72px;
     right: 10px;
-    width: min(360px, calc(100vw - 20px));
-    max-height: calc(100vh - 82px);
+    min-width: 285px;
+    min-height: 190px;
+    max-width: min(720px, 96vw);
+    max-height: 90vh;
+    resize: both;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     color: var(--SmartThemeBodyColor);
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 92%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 94%, transparent);
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 12px;
-    box-shadow: 0 10px 35px rgba(0,0,0,.35);
+    border-radius: 11px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.42);
     backdrop-filter: blur(12px);
-    overflow: hidden;
+}
+
+#enpc-panel.enpc-moving {
+    user-select: none;
+    opacity: .94;
 }
 
 #enpc-panel.enpc-collapsed {
-    width: auto;
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px;
+    min-height: 44px;
+    resize: none;
 }
+
 #enpc-panel.enpc-collapsed .enpc-body,
 #enpc-panel.enpc-collapsed .enpc-header strong,
 #enpc-panel.enpc-collapsed #enpc-count,
@@ -28,117 +41,155 @@
 }
 
 .enpc-header {
+    flex: 0 0 auto;
     display: grid;
-    grid-template-columns: auto 1fr auto auto;
-    gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center;
-    padding: 9px 10px;
+    gap: 7px;
+    min-height: 42px;
+    padding: 6px 8px;
     border-bottom: 1px solid var(--SmartThemeBorderColor);
+    cursor: grab;
+    touch-action: none;
 }
+
+.enpc-header:active {
+    cursor: grabbing;
+}
+
+.enpc-header strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .enpc-header button {
-    min-width: 30px;
-    min-height: 30px;
+    width: 29px;
+    height: 29px;
     border: 0;
     border-radius: 7px;
     color: inherit;
     background: rgba(255,255,255,.08);
     cursor: pointer;
 }
+
 #enpc-count {
-    min-width: 24px;
+    min-width: 25px;
     padding: 2px 7px;
-    text-align: center;
     border-radius: 999px;
+    text-align: center;
     background: rgba(255,255,255,.1);
 }
 
 .enpc-body {
     min-height: 0;
+    flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 9px;
+    padding: 8px;
 }
+
 #enpc-search {
+    flex: 0 0 auto;
     width: 100%;
-    margin-bottom: 7px;
+    margin-bottom: 6px;
 }
-.enpc-columns {
-    display: grid;
-    grid-template-columns: 38px minmax(90px, 1fr) minmax(100px, 1.15fr);
-    gap: 6px;
-    padding: 4px 8px 6px;
-    font-size: .72rem;
-    opacity: .62;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-}
-#enpc-list {
-    overflow-y: auto;
-    min-height: 70px;
-    max-height: calc(100vh - 235px);
-}
+
+.enpc-columns,
 .enpc-row {
-    width: 100%;
     display: grid;
-    grid-template-columns: 38px minmax(90px, 1fr) minmax(100px, 1.15fr) auto;
+    grid-template-columns: 42px minmax(90px, 1fr) minmax(110px, 1.15fr) auto;
     gap: 6px;
     align-items: center;
-    padding: 8px;
+}
+
+.enpc-columns {
+    flex: 0 0 auto;
+    padding: 3px 7px 6px;
+    font-size: .68rem;
+    opacity: .62;
+    text-transform: uppercase;
+    letter-spacing: .045em;
+}
+
+#enpc-list {
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
+    border-top: 1px solid rgba(255,255,255,.04);
+    border-bottom: 1px solid rgba(255,255,255,.04);
+}
+
+.enpc-row {
+    width: 100%;
+    padding: 8px 7px;
     border: 0;
-    border-bottom: 1px solid rgba(255,255,255,.065);
+    border-bottom: 1px solid rgba(255,255,255,.06);
     color: inherit;
     background: transparent;
     text-align: left;
     cursor: pointer;
 }
+
 .enpc-row:hover {
     background: rgba(255,255,255,.07);
 }
+
 .enpc-status {
-    font-size: 1.2rem;
+    font-size: 1.15rem;
     text-align: center;
 }
+
 .enpc-name {
     font-weight: 650;
+}
+
+.enpc-name,
+.enpc-relation {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.enpc-relationship {
+
+.enpc-relation {
     opacity: .82;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
+
 .enpc-lock {
-    font-size: .75rem;
-    opacity: .65;
+    font-size: .72rem;
+    opacity: .7;
 }
+
 .enpc-empty {
-    padding: 22px 8px;
+    padding: 26px 8px;
     text-align: center;
     opacity: .65;
 }
+
 .enpc-footer {
+    flex: 0 0 auto;
     display: flex;
     gap: 7px;
-    margin-top: 8px;
+    padding-top: 8px;
 }
-.enpc-footer #enpc-analyze {
+
+#enpc-analyze {
     flex: 1;
 }
 
-.enpc-modal-overlay {
+.enpc-overlay {
     position: fixed;
-    z-index: 10001;
+    z-index: 12000;
     inset: 0;
     display: grid;
     place-items: center;
     padding: 15px;
-    background: rgba(0,0,0,.62);
+    background: rgba(0,0,0,.66);
 }
+
 .enpc-modal {
-    width: min(480px, 100%);
+    width: min(470px, 96vw);
     max-height: 90vh;
     overflow-y: auto;
     display: flex;
@@ -149,47 +200,38 @@
     background: var(--SmartThemeBlurTintColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 12px;
-    box-shadow: 0 15px 50px rgba(0,0,0,.45);
+    box-shadow: 0 18px 60px rgba(0,0,0,.5);
 }
+
 .enpc-modal h3 {
-    margin: 0 0 7px;
+    margin: 0 0 5px;
 }
+
 .enpc-modal label:not(.enpc-check) {
-    margin-top: 5px;
-    font-size: .82rem;
+    margin-top: 4px;
+    font-size: .8rem;
     opacity: .78;
 }
+
 .enpc-check {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: 6px 0;
-}
-.enpc-modal-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-top: 12px;
-    flex-wrap: wrap;
-}
-.enpc-spacer {
-    flex: 1;
-}
-.enpc-help {
-    margin: 4px 0;
-    font-size: .84rem;
-    line-height: 1.4;
-    opacity: .72;
+    margin-top: 5px;
 }
 
-@media (max-width: 800px) {
+.enpc-actions {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    margin-top: 11px;
+}
+
+@media (max-width: 700px) {
     #enpc-panel {
-        top: auto;
-        bottom: 10px;
-        right: 10px;
-        max-height: 60vh;
-    }
-    #enpc-list {
-        max-height: calc(60vh - 155px);
+        min-width: 270px;
+        max-width: calc(100vw - 12px);
+        max-height: 75vh;
     }
 }
