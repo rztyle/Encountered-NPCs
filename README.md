@@ -4,14 +4,16 @@ A compact universal NPC tracker displaying only:
 
 **Status · Name · Relationship**
 
-## Version 0.2.0
+## Version 0.2.1
 
-- Fixed manual Add and Save using dependable browser-local storage.
+- Fixed Add/Save on plain HTTP LAN servers where `crypto.randomUUID()` is unavailable.
+- Added visible error reporting if saving fails.
 - Added draggable title bar.
 - Added resizable panel.
 - Remembers panel position and size.
 - Added a reset-position button.
-- Made model output parsing tolerate JSON, fenced JSON, and simple text rows.
+- Made model output parsing tolerate strings, object-shaped responses, JSON, fenced JSON, and simple text rows.
+- Added a fallback scanner that detects repeated named NPCs directly from recent chat when the model returns no usable list.
 - Automatic analysis is manual by default to avoid repeated errors and extra generations.
 - Keeps separate NPC data for each chat.
 
@@ -50,4 +52,4 @@ In SillyTavern, open Extensions and select **Update** for Encountered NPCs, then
 
 ## Storage
 
-Version 0.2.0 uses browser `localStorage`, separated by chat. This fixes the save failure seen with chat metadata on some SillyTavern builds. Browser storage means the list is tied to that browser/profile unless exported in a later version.
+Version 0.2.1 uses browser `localStorage`, separated by chat. This fixes the save failure seen with chat metadata on some SillyTavern builds. Browser storage means the list is tied to that browser/profile unless exported in a later version.

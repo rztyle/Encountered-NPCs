@@ -89,6 +89,20 @@ function persistData() {
     localStorage.setItem(storageKey(), JSON.stringify(data));
 }
 
+function makeId() {
+    // crypto.randomUUID() is unavailable on many plain-HTTP LAN installations.
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    if (globalThis.crypto?.getRandomValues) {
+        const bytes = new Uint8Array(16);
+        globalThis.crypto.getRandomValues(bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = [...bytes].map(v => v.toString(16).padStart(2, '0'));
+        return `${hex.slice(0,4).join('')}-${hex.slice(4,6).join('')}-${hex.slice(6,8).join('')}-${hex.slice(8,10).join('')}-${hex.slice(10).join('')}`;
+    }
+    return `enpc-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 function normalizeName(value) {
     return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 80);
 }
@@ -145,7 +159,7 @@ function upsertNpc(input, force = false) {
     }
 
     data.npcs.push({
-        id: crypto.randomUUID(),
+        id: makeId(),
         name,
         status,
         relationship,
@@ -240,6 +254,7 @@ function openEditor(id = null) {
     form.addEventListener('submit', e => {
         e.preventDefault();
 
+        try {
         const name = normalizeName(overlay.querySelector('#enpc-name-input').value);
         const relationship = normalizeRelationship(overlay.querySelector('#enpc-relation-input').value);
         const status = overlay.querySelector('#enpc-status-input').value;
@@ -266,6 +281,10 @@ function openEditor(id = null) {
         render();
         toastr.success('NPC saved.');
         close();
+        } catch (error) {
+            console.error('[Encountered NPCs] Save failed:', error);
+            toastr.error(`NPC save failed: ${error.message}`);
+        }
     });
 
     overlay.querySelector('#enpc-delete')?.addEventListener('click', () => {
@@ -279,8 +298,24 @@ function openEditor(id = null) {
     setTimeout(() => overlay.querySelector('#enpc-name-input')?.focus(), 0);
 }
 
+function responseText(raw) {
+    if (typeof raw === 'string') return raw;
+    if (!raw) return '';
+    if (typeof raw === 'object') {
+        const direct = raw.text ?? raw.content ?? raw.response ?? raw.result ?? raw.message;
+        if (typeof direct === 'string') return direct;
+        if (Array.isArray(raw.choices)) {
+            return raw.choices
+                .map(choice => choice?.message?.content ?? choice?.text ?? '')
+                .filter(Boolean)
+                .join('\n');
+        }
+    }
+    return String(raw);
+}
+
 function parseAnalysis(raw) {
-    const text = String(raw || '').trim();
+    const text = responseText(raw).trim();
 
     const candidates = [
         text,
@@ -329,6 +364,56 @@ function parseAnalysis(raw) {
     }
 
     return rows;
+}
+
+
+function fallbackScanTranscript() {
+    const chat = ctx().chat || [];
+    const text = chat.slice(-20).map(m => String(m.mes || '')).join('\n');
+    const playerNames = new Set([
+        String(ctx().name1 || '').trim().toLowerCase(),
+        String(ctx().userName || '').trim().toLowerCase(),
+    ].filter(Boolean));
+
+    const found = new Map();
+    const add = (name, relationship = 'Encountered') => {
+        name = normalizeName(name)
+            .replace(/^(Aunt|Uncle|Lady|Lord|Master|Elder|Senior|Junior)\s+/i, match => match);
+        if (!name || name.length < 2 || name.length > 60) return;
+        if (playerNames.has(name.toLowerCase())) return;
+        if (/^(The|This|That|Inside|Outside|Once|Twice|Then|For|By|Her|His|She|He|They|It|No|Come)$/i.test(name)) return;
+        const key = name.toLowerCase();
+        if (!found.has(key)) found.set(key, { name, relationship, status: inferStatus('', relationship) });
+    };
+
+    // Strong role + name patterns.
+    const rolePatterns = [
+        [/\b(Aunt|Uncle)\s+([A-Z][\p{L}'-]{1,30})\b/gu, m => [`${m[1]} ${m[2]}`, m[1]]],
+        [/\b(Master|Mentor|Teacher|Elder)\s+([A-Z][\p{L}'-]{1,30}(?:\s+[A-Z][\p{L}'-]{1,30})?)\b/gu, m => [m[2], m[1]]],
+        [/\b([A-Z][\p{L}'-]{1,30}(?:\s+[A-Z][\p{L}'-]{1,30})?)\s*,?\s+(?:his|her|their)\s+(mother|father|sister|brother|aunt|uncle|master|mentor|friend|ally|rival|enemy|lover)\b/giu,
+            m => [m[1], m[2]]],
+    ];
+
+    for (const [pattern, convert] of rolePatterns) {
+        for (const match of text.matchAll(pattern)) {
+            const [name, relationship] = convert(match);
+            add(name, relationship.replace(/^./, c => c.toUpperCase()));
+        }
+    }
+
+    // Repeated proper names are safer than every capitalized phrase.
+    const counts = new Map();
+    const namePattern = /\b([A-Z][\p{L}'-]{1,30}(?:\s+[A-Z][\p{L}'-]{1,30}){0,2})\b/gu;
+    for (const match of text.matchAll(namePattern)) {
+        const name = normalizeName(match[1]);
+        if (/^(The|A|An|At|Inside|Outside|Once|Twice|Then|For|By|Her|His|She|He|They|Dragon Aura|Azure Dragon Sanctuary)$/i.test(name)) continue;
+        counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    for (const [name, count] of counts) {
+        if (count >= 2) add(name, 'Encountered');
+    }
+
+    return [...found.values()].slice(0, 100);
 }
 
 function transcript() {
@@ -393,10 +478,18 @@ ${transcript()}
         `.trim();
 
         const result = await c.generateQuietPrompt({ quietPrompt: prompt });
-        const rows = parseAnalysis(result);
+        console.debug('[Encountered NPCs] Raw analysis response:', result);
+
+        let rows = parseAnalysis(result);
+        if (!rows.length) {
+            rows = fallbackScanTranscript();
+            if (rows.length) {
+                toastr.info('The model returned no usable list, so NPC names were scanned from the chat.');
+            }
+        }
 
         if (!rows.length) {
-            throw new Error('No usable NPC rows were returned.');
+            throw new Error('No named NPCs could be detected in the model output or recent chat.');
         }
 
         let changed = false;
@@ -566,7 +659,7 @@ function initialize() {
         setTimeout(switchChat, 50);
     });
 
-    console.log('[Encountered NPCs] v0.2.0 loaded');
+    console.log('[Encountered NPCs] v0.2.1 loaded');
 }
 
 const c = ctx();
