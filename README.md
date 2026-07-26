@@ -2,61 +2,67 @@
 
 A lightweight, mobile-first character tracker for SillyTavern.
 
-## What it does
+## Features
 
-- Keeps a separate character list for each chat.
-- Works on phone, tablet, and desktop.
-- Lets the user enter Status, Summary, and Notes.
-- Scans the currently loaded chat for likely character names.
-- Makes simple local guesses for Relationship, Age, and Sex.
-- Shows scan results for review before importing.
-- Makes no API calls and never scans automatically.
+- Separate saved character list for each active chat or group
+- Add, edit, delete, and search
+- Mobile, tablet, and desktop layout
+- Manual local chat scanner
+- No model call, API call, background scan, or automatic import
+- Review results before importing
+- Scanner leaves unclear values blank as **Unknown**
+- Scanner never writes Status, Summary, or Notes
 
-## Scanner behavior
+## Scanner
 
-The scanner uses basic browser-side text rules. It checks:
+The scanner reads `SillyTavern.getContext().chat` from the currently active chat.
 
-- SillyTavern message speaker names.
-- Repeated names near dialogue or action words.
-- Explicit ages such as `Alice is 18` or `18-year-old Alice`.
-- Nearby pronouns and family/role words.
-- Common relationship words such as friend, rival, teacher, sister, boss, and classmate.
+It checks:
 
-When information is not clear, the field remains blank/Unknown. It does not invent missing details.
+- Non-user message speaker names
+- Repeated capitalized names near dialogue/action words
+- Explicit ages such as `Alice is 18` and `18-year-old Alice`
+- Nearby pronouns and family-role words
+- Common relationship terms such as friend, rival, teacher, sister, boss, and classmate
 
-The scanner never writes Summary, Notes, or Status.
+This is intentionally a simple rule-based scanner. It does not invent missing information.
 
-## Installation
+## Install from GitHub
 
 In SillyTavern:
 
-1. Open **Extensions**.
-2. Choose **Install Extension**.
-3. Enter:
+1. Open **Extensions**
+2. Open **Install Extension**
+3. Paste:
 
    `https://github.com/rztyle/Encountered-NPCs`
 
-For manual testing, copy this folder into:
+4. Reload SillyTavern
 
-`SillyTavern/data/<user>/extensions/Encountered-NPCs`
+## Manual development install
 
-or install it for all users under SillyTavern's third-party extensions directory.
+Copy or symlink the repository into the current user's extension folder:
 
-Restart or reload SillyTavern.
+```bash
+ln -s ~/Projects/Encountered-NPCs \
+  ~/SillyTavern/data/default-user/extensions/Encountered-NPCs
+```
 
-## Testing
+The actual user folder may differ from `default-user`.
 
-1. Open a chat that contains several named characters.
-2. Tap the address-book button.
-3. Tap **Scan Chat**.
-4. Review the names and inferred details.
-5. Import selected characters.
-6. Open a character and add your Summary and Notes.
+## Test
 
-## Privacy
+1. Open a chat with named recurring characters
+2. Press the floating address-book button
+3. Press **Scan Chat**
+4. Review the guesses
+5. Import selected characters
+6. Open a character and write your own Summary or Notes
 
-All data stays in the browser's local storage. There are no network requests from this extension.
+## Storage
+
+Data is saved in browser local storage. Nothing is transmitted by this extension.
 
 ## Version
 
-2.2.0
+2.2.1

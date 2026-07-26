@@ -1,47 +1,46 @@
 :root {
-    --enpc-gap: 10px;
     --enpc-radius: 12px;
 }
 
-#enpc-open,
+.enpc-launcher,
 .enpc-panel,
 .enpc-backdrop {
     font-family: var(--mainFontFamily, system-ui, sans-serif);
 }
 
-.enpc-floating {
+.enpc-launcher {
     position: fixed;
     right: max(12px, env(safe-area-inset-right));
     bottom: max(76px, calc(env(safe-area-inset-bottom) + 76px));
     z-index: 3000;
     width: 46px;
     height: 46px;
-    border-radius: 50%;
+    padding: 0;
     border: 1px solid var(--SmartThemeBorderColor);
-    background: var(--SmartThemeBlurTintColor);
+    border-radius: 50%;
     color: var(--SmartThemeBodyColor);
+    background: var(--SmartThemeBlurTintColor);
+    box-shadow: 0 4px 18px rgb(0 0 0 / 25%);
     backdrop-filter: blur(12px);
     cursor: pointer;
-    box-shadow: 0 4px 18px rgb(0 0 0 / 25%);
 }
 
 .enpc-panel {
     position: fixed;
-    top: 0;
-    right: 0;
+    inset: 0 0 0 auto;
     z-index: 3100;
     width: min(420px, 100vw);
     height: 100dvh;
     display: flex;
     flex-direction: column;
-    background: var(--SmartThemeBlurTintColor);
+    padding-bottom: env(safe-area-inset-bottom);
     color: var(--SmartThemeBodyColor);
+    background: var(--SmartThemeBlurTintColor);
     border-left: 1px solid var(--SmartThemeBorderColor);
+    box-shadow: -8px 0 28px rgb(0 0 0 / 25%);
     backdrop-filter: blur(18px);
     transform: translateX(105%);
     transition: transform 160ms ease;
-    box-shadow: -8px 0 28px rgb(0 0 0 / 25%);
-    padding-bottom: env(safe-area-inset-bottom);
 }
 
 .enpc-panel.open {
@@ -49,20 +48,20 @@
 }
 
 .enpc-header,
-.enpc-modal > header {
+.enpc-modal-header {
+    min-height: 54px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--enpc-gap);
-    min-height: 54px;
+    gap: 10px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--SmartThemeBorderColor);
 }
 
-.enpc-modal > header small {
+.enpc-modal-header small {
     display: block;
-    opacity: .7;
     margin-top: 2px;
+    opacity: .7;
 }
 
 .enpc-toolbar {
@@ -95,15 +94,15 @@
 .enpc-card {
     width: 100%;
     display: grid;
-    grid-template-columns: 34px 1fr auto;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
     padding: 11px 8px;
-    text-align: left;
-    color: inherit;
-    background: transparent;
     border: 0;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor), transparent 35%);
+    color: inherit;
+    background: transparent;
+    text-align: left;
     cursor: pointer;
 }
 
@@ -117,28 +116,28 @@
     text-align: center;
 }
 
-.enpc-card-main {
+.enpc-card-body {
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
 }
 
-.enpc-card-main strong,
-.enpc-card-main small,
+.enpc-card-body strong,
+.enpc-card-body small,
 .enpc-summary {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
 
-.enpc-card-main small {
+.enpc-card-body small {
     opacity: .72;
 }
 
 .enpc-summary {
-    opacity: .86;
     margin-top: 3px;
+    opacity: .86;
 }
 
 .enpc-empty {
@@ -153,8 +152,11 @@
     z-index: 3200;
     display: grid;
     place-items: center;
-    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
-             max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    padding:
+        max(12px, env(safe-area-inset-top))
+        max(12px, env(safe-area-inset-right))
+        max(12px, env(safe-area-inset-bottom))
+        max(12px, env(safe-area-inset-left));
     background: rgb(0 0 0 / 55%);
 }
 
@@ -164,10 +166,10 @@
 
 .enpc-modal {
     width: min(620px, 100%);
-    max-height: min(860px, 100%);
+    max-height: 100%;
     overflow: auto;
-    background: var(--SmartThemeBlurTintColor);
     color: var(--SmartThemeBodyColor);
+    background: var(--SmartThemeBlurTintColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: var(--enpc-radius);
     box-shadow: 0 12px 48px rgb(0 0 0 / 45%);
@@ -182,10 +184,10 @@
 }
 
 .enpc-form-grid label {
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 5px;
-    min-width: 0;
     font-size: .92em;
 }
 
@@ -197,8 +199,7 @@
     grid-column: 1 / -1;
 }
 
-.enpc-user-only {
-    font-size: .8em;
+.enpc-form-grid label small {
     opacity: .55;
     font-weight: normal;
 }
@@ -207,7 +208,7 @@
     resize: vertical;
 }
 
-.enpc-modal > footer {
+.enpc-modal-footer {
     position: sticky;
     bottom: 0;
     display: flex;
@@ -229,7 +230,7 @@
     color: #ff8c8c !important;
 }
 
-.enpc-icon-btn {
+.enpc-icon-button {
     min-width: 42px;
     padding: 0 !important;
 }
@@ -275,24 +276,14 @@
     font-size: .78em;
 }
 
-.enpc-scan-item.exists {
+.enpc-scan-item.is-saved {
     opacity: .55;
 }
 
 @media (max-width: 600px) {
-    .enpc-floating {
-        width: 44px;
-        height: 44px;
-        bottom: max(70px, calc(env(safe-area-inset-bottom) + 70px));
-    }
-
     .enpc-panel {
         width: 100vw;
         border-left: 0;
-    }
-
-    .enpc-toolbar {
-        grid-template-columns: 1fr auto auto;
     }
 
     .enpc-toolbar button {
@@ -318,7 +309,6 @@
     }
 
     .enpc-modal {
-        max-height: 100%;
         border-radius: 10px;
     }
 }
