@@ -1,7 +1,7 @@
 const MODULE = 'encountered_npcs_v2';
 const STORAGE_PREFIX = `${MODULE}:chat:`;
 const SETTINGS_KEY = `${MODULE}:settings`;
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 
 const STATUS_OPTIONS = [
     ['❓', 'Unknown'],
@@ -362,60 +362,161 @@ function responseText(raw) {
     return String(raw);
 }
 
+function cleanModelText(raw) {
+    return responseText(raw)
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+        .replace(/```(?:json|javascript|js|text|txt|csv|tsv)?/gi, '')
+        .replace(/```/g, '')
+        .trim();
+}
+
+function normalizeParsedRow(row) {
+    if (!row || typeof row !== 'object') return null;
+
+    const name = normalizeName(
+        row.name ?? row.character ?? row.characterName ?? row.npc ?? row.full_name
+    );
+
+    if (!name) return null;
+
+    const relationship = normalizeRelationship(
+        row.relationship ?? row.relation ?? row.role ?? row.connection ?? 'Unknown'
+    );
+
+    const summary = normalizeSummary(
+        row.summary ?? row.description ?? row.note ?? row.details ?? row.identity ?? ''
+    );
+
+    return {
+        name,
+        status: inferStatus(row.status ?? row.emoji ?? row.icon, relationship),
+        relationship,
+        summary,
+    };
+}
+
 function parseAnalysis(raw) {
-    const text = responseText(raw).trim();
+    const text = cleanModelText(raw);
     if (!text) return [];
 
-    const candidates = [
-        text,
-        text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''),
-    ];
+    const candidates = [text];
 
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-        candidates.push(text.slice(firstBrace, lastBrace + 1));
+    const firstObject = text.indexOf('{');
+    const lastObject = text.lastIndexOf('}');
+    if (firstObject >= 0 && lastObject > firstObject) {
+        candidates.push(text.slice(firstObject, lastObject + 1));
+    }
+
+    const firstArray = text.indexOf('[');
+    const lastArray = text.lastIndexOf(']');
+    if (firstArray >= 0 && lastArray > firstArray) {
+        candidates.push(text.slice(firstArray, lastArray + 1));
     }
 
     for (const candidate of candidates) {
         try {
             const parsed = JSON.parse(candidate);
-            const rows = Array.isArray(parsed) ? parsed : parsed?.npcs;
-            if (Array.isArray(rows)) return rows;
+            const rows = Array.isArray(parsed)
+                ? parsed
+                : parsed?.npcs ?? parsed?.characters ?? parsed?.results ?? parsed?.data;
+
+            if (Array.isArray(rows)) {
+                return rows.map(normalizeParsedRow).filter(Boolean);
+            }
+
+            const one = normalizeParsedRow(parsed);
+            if (one) return [one];
         } catch {}
     }
 
     const rows = [];
+    const lines = text.split(/\r?\n/);
 
-    for (const rawLine of text.split(/\r?\n/)) {
-        const line = rawLine
-            .replace(/^[\s>*#\-•\d.)]+/, '')
-            .replace(/[*_`]/g, '')
-            .trim();
-
+    for (let rawLine of lines) {
+        let line = rawLine.trim();
         if (!line) continue;
 
-        const parts = line.split('|').map(part => part.trim());
-        if (parts.length >= 4 && STATUS_OPTIONS.some(([emoji]) => emoji === parts[0])) {
-            rows.push({
-                status: parts[0],
-                name: parts[1],
-                relationship: parts[2],
-                summary: parts.slice(3).join(' | '),
-            });
+        // Ignore table separators and common headers.
+        if (/^\|?\s*:?-{2,}/.test(line)) continue;
+        if (/^\|?\s*(status|emoji|icon)\s*\|/i.test(line)) continue;
+        if (/^\s*(name|character)\s*[:|]\s*(relationship|relation)/i.test(line)) continue;
+
+        line = line
+            .replace(/^[\s>*#•]+/, '')
+            .replace(/^\d+[.)]\s*/, '')
+            .replace(/\*\*/g, '')
+            .replace(/`/g, '')
+            .trim();
+
+        // Markdown/pipe table: | emoji | Name | Relationship | Summary |
+        if (line.includes('|')) {
+            const parts = line
+                .split('|')
+                .map(part => part.trim())
+                .filter(Boolean);
+
+            if (parts.length >= 4 && STATUS_OPTIONS.some(([emoji]) => emoji === parts[0])) {
+                rows.push(normalizeParsedRow({
+                    status: parts[0],
+                    name: parts[1],
+                    relationship: parts[2],
+                    summary: parts.slice(3).join(' | '),
+                }));
+                continue;
+            }
+
+            if (parts.length >= 3) {
+                rows.push(normalizeParsedRow({
+                    name: parts[0],
+                    relationship: parts[1],
+                    summary: parts.slice(2).join(' | '),
+                }));
+                continue;
+            }
+        }
+
+        // Tab-separated output.
+        const tabs = line.split(/\t+/).map(part => part.trim()).filter(Boolean);
+        if (tabs.length >= 4 && STATUS_OPTIONS.some(([emoji]) => emoji === tabs[0])) {
+            rows.push(normalizeParsedRow({
+                status: tabs[0],
+                name: tabs[1],
+                relationship: tabs[2],
+                summary: tabs.slice(3).join(' '),
+            }));
             continue;
         }
 
-        if (parts.length >= 3) {
-            rows.push({
-                name: parts[0],
-                relationship: parts[1],
-                summary: parts.slice(2).join(' | '),
-            });
+        // Emoji — Name — Relationship — Summary
+        const dash = line.split(/\s+(?:—|–|-)\s+/).map(part => part.trim()).filter(Boolean);
+        if (dash.length >= 4 && STATUS_OPTIONS.some(([emoji]) => emoji === dash[0])) {
+            rows.push(normalizeParsedRow({
+                status: dash[0],
+                name: dash[1],
+                relationship: dash[2],
+                summary: dash.slice(3).join(' — '),
+            }));
+            continue;
+        }
+
+        // Name: X; Relationship: Y; Summary: Z; Status: emoji
+        const nameMatch = line.match(/(?:name|character)\s*:\s*([^;]+)/i);
+        const relationshipMatch = line.match(/(?:relationship|relation|role)\s*:\s*([^;]+)/i);
+        const summaryMatch = line.match(/(?:summary|description|note)\s*:\s*([^;]+)/i);
+        const statusMatch = line.match(/(?:status|emoji|icon)\s*:\s*([^\s;]+)/i);
+
+        if (nameMatch && relationshipMatch) {
+            rows.push(normalizeParsedRow({
+                name: nameMatch[1],
+                relationship: relationshipMatch[1],
+                summary: summaryMatch?.[1] || '',
+                status: statusMatch?.[1] || '',
+            }));
         }
     }
 
-    return rows;
+    return rows.filter(Boolean);
 }
 
 function transcript() {
@@ -425,6 +526,60 @@ function transcript() {
         const speaker = message.is_user ? 'PLAYER' : (message.name || 'NARRATOR');
         return `${speaker}: ${String(message.mes || '').slice(0, 5000)}`;
     }).join('\n\n');
+}
+
+async function requestCharacterAnalysis(prompt) {
+    const c = context();
+
+    const jsonSchema = {
+        name: 'encountered_npcs',
+        strict: true,
+        value: {
+            type: 'object',
+            properties: {
+                npcs: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            name: { type: 'string' },
+                            status: {
+                                type: 'string',
+                                enum: STATUS_OPTIONS.map(([emoji]) => emoji),
+                            },
+                            relationship: { type: 'string' },
+                            summary: { type: 'string' },
+                        },
+                        required: ['name', 'status', 'relationship', 'summary'],
+                        additionalProperties: false,
+                    },
+                },
+            },
+            required: ['npcs'],
+            additionalProperties: false,
+        },
+    };
+
+    try {
+        return await c.generateQuietPrompt({
+            quietPrompt: prompt,
+            skipWIAN: true,
+            responseLength: 700,
+            jsonSchema,
+            removeReasoning: true,
+            trimToSentence: false,
+        });
+    } catch (structuredError) {
+        console.warn('[Encountered NPCs] Structured output unavailable; retrying normally.', structuredError);
+
+        return await c.generateQuietPrompt({
+            quietPrompt: prompt,
+            skipWIAN: true,
+            responseLength: 700,
+            removeReasoning: true,
+            trimToSentence: false,
+        });
+    }
 }
 
 async function analyze() {
@@ -454,47 +609,67 @@ async function analyze() {
         }));
 
         const prompt = `
-Update the character tracker using the recent roleplay.
+Read the recent roleplay and update the named NPC list.
 
-Return valid JSON only:
-{"npcs":[{"name":"Name","status":"emoji","relationship":"short relationship","summary":"one short sentence"}]}
+Return ONLY this JSON shape:
+{"npcs":[{"name":"Name","status":"❓","relationship":"Short label","summary":"One short sentence."}]}
 
-Allowed status emojis:
-❓ unknown
-😐 neutral
-😊 friend
-🤝 ally
-❤️ romance
-👑 family
-🎓 mentor
-😠 rival
-⚔️ enemy
-💀 dead
+Allowed status values: ❓ 😐 😊 🤝 ❤️ 👑 🎓 😠 ⚔️ 💀
 
-Rules:
-- Include only named NPCs who appear or directly interact in the story.
-- Never include the player, narrator, places, factions, unnamed roles, or generic groups.
-- Relationship must be short, such as Aunt, Friend, Master, Enemy, Fiancée, or Stranger.
-- Summary must explain who the character is or why they matter.
-- Summary must be one short sentence and no more than 160 characters.
-- Preserve useful existing summaries unless the story clearly changes them.
-- Do not modify locked characters.
-- Do not invent characters.
-- Return JSON only, without markdown.
+Requirements:
+- Include named NPCs only.
+- Do not include the player, narrator, locations, organizations, titles without names, or unnamed groups.
+- Relationship examples: Aunt, Friend, Master, Enemy, Fiancée, Stranger.
+- Summary must identify the NPC or explain why they matter.
+- Summary must be no more than 160 characters.
+- Keep useful existing data unless the story clearly changes it.
+- Never change locked entries.
+- Do not invent names.
+- Return no explanation and no markdown.
 
-Existing characters:
+Existing tracker:
 ${JSON.stringify(existing)}
 
 Recent roleplay:
 ${transcript()}
         `.trim();
 
-        const result = await c.generateQuietPrompt({ quietPrompt: prompt });
+        let result = await requestCharacterAnalysis(prompt);
         console.debug('[Encountered NPCs] Raw analysis response:', result);
 
-        const rows = parseAnalysis(result);
+        let rows = parseAnalysis(result);
+
+        // Some local roleplay models ignore JSON. Retry using a very simple line format.
         if (!rows.length) {
-            throw new Error('The model did not return a usable character list.');
+            const retryPrompt = `
+Extract named NPCs from the roleplay below.
+
+Output one NPC per line exactly like:
+❓ | Name | Relationship | Short summary
+
+Use only these first-column emojis:
+❓ 😐 😊 🤝 ❤️ 👑 🎓 😠 ⚔️ 💀
+
+Do not output headers, numbering, explanations, code fences, the player, narrator, places, factions, or unnamed people.
+
+Recent roleplay:
+${transcript()}
+            `.trim();
+
+            result = await c.generateQuietPrompt({
+                quietPrompt: retryPrompt,
+                skipWIAN: true,
+                responseLength: 700,
+                removeReasoning: true,
+                trimToSentence: false,
+            });
+
+            console.debug('[Encountered NPCs] Raw retry response:', result);
+            rows = parseAnalysis(result);
+        }
+
+        if (!rows.length) {
+            throw new Error('The model response could not be parsed. Open the browser console to see the raw response.');
         }
 
         let changed = false;
@@ -511,7 +686,9 @@ ${transcript()}
         }
     } catch (error) {
         console.error('[Encountered NPCs]', error);
-        toastr.error(`Character analysis failed: ${error.message}`);
+        toastr.error(`Character analysis failed: ${error.message}`, '', {
+            preventDuplicates: true,
+        });
     } finally {
         analyzing = false;
 

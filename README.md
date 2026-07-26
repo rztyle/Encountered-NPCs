@@ -14,8 +14,13 @@ Example:
 🎓  Mu Xian    Master   Sword master of the Azure Dragon Sect.
 ```
 
-## Version 1.0.0
+## Version 1.0.1
 
+- Fixed analysis parsing for local roleplay models.
+- Added structured-output support when the selected API supports it.
+- Added an automatic second attempt using a simple pipe-delimited format.
+- Added support for JSON, markdown tables, pipe rows, tab rows, and labeled text.
+- Prevents duplicate failure notifications.
 - Rewritten character storage and UI logic.
 - Added a working Summary field.
 - Added Summary to the main table.
