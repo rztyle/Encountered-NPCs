@@ -14,8 +14,10 @@ Example:
 🎓  Mu Xian    Master   Sword master of the Azure Dragon Sect.
 ```
 
-## Version 1.0.1
+## Version 1.0.2
 
+- Fixed the SillyTavern quiet-generation call for older and current client versions.
+- The prompt is now passed as a string instead of an options object.
 - Fixed analysis parsing for local roleplay models.
 - Added structured-output support when the selected API supports it.
 - Added an automatic second attempt using a simple pipe-delimited format.

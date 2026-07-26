@@ -1,7 +1,7 @@
 const MODULE = 'encountered_npcs_v2';
 const STORAGE_PREFIX = `${MODULE}:chat:`;
 const SETTINGS_KEY = `${MODULE}:settings`;
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 
 const STATUS_OPTIONS = [
     ['❓', 'Unknown'],
@@ -345,17 +345,44 @@ function openEditor(id = null) {
 
 function responseText(raw) {
     if (typeof raw === 'string') return raw;
-    if (!raw) return '';
+    if (raw == null) return '';
+
+    if (Array.isArray(raw)) {
+        return raw.map(responseText).filter(Boolean).join('\n');
+    }
 
     if (typeof raw === 'object') {
-        const direct = raw.text ?? raw.content ?? raw.response ?? raw.result ?? raw.message;
-        if (typeof direct === 'string') return direct;
+        const directKeys = [
+            'text',
+            'content',
+            'response',
+            'result',
+            'message',
+            'output',
+            'data',
+        ];
+
+        for (const key of directKeys) {
+            const value = raw[key];
+            if (typeof value === 'string') return value;
+            if (value && typeof value === 'object') {
+                const nested = responseText(value);
+                if (nested) return nested;
+            }
+        }
 
         if (Array.isArray(raw.choices)) {
-            return raw.choices
-                .map(choice => choice?.message?.content ?? choice?.text ?? '')
-                .filter(Boolean)
-                .join('\n');
+            const choices = raw.choices
+                .map(choice => responseText(choice?.message?.content ?? choice?.text ?? choice))
+                .filter(Boolean);
+
+            if (choices.length) return choices.join('\n');
+        }
+
+        try {
+            return JSON.stringify(raw);
+        } catch {
+            return String(raw);
         }
     }
 
@@ -531,55 +558,18 @@ function transcript() {
 async function requestCharacterAnalysis(prompt) {
     const c = context();
 
-    const jsonSchema = {
-        name: 'encountered_npcs',
-        strict: true,
-        value: {
-            type: 'object',
-            properties: {
-                npcs: {
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            name: { type: 'string' },
-                            status: {
-                                type: 'string',
-                                enum: STATUS_OPTIONS.map(([emoji]) => emoji),
-                            },
-                            relationship: { type: 'string' },
-                            summary: { type: 'string' },
-                        },
-                        required: ['name', 'status', 'relationship', 'summary'],
-                        additionalProperties: false,
-                    },
-                },
-            },
-            required: ['npcs'],
-            additionalProperties: false,
-        },
-    };
-
-    try {
-        return await c.generateQuietPrompt({
-            quietPrompt: prompt,
-            skipWIAN: true,
-            responseLength: 700,
-            jsonSchema,
-            removeReasoning: true,
-            trimToSentence: false,
-        });
-    } catch (structuredError) {
-        console.warn('[Encountered NPCs] Structured output unavailable; retrying normally.', structuredError);
-
-        return await c.generateQuietPrompt({
-            quietPrompt: prompt,
-            skipWIAN: true,
-            responseLength: 700,
-            removeReasoning: true,
-            trimToSentence: false,
-        });
-    }
+    // SillyTavern versions differ here. The most compatible form is the
+    // positional signature with the prompt string as the first argument.
+    // Passing an options object to older builds can make the model receive
+    // "[object Object]" instead of the actual instructions.
+    return await c.generateQuietPrompt(
+        prompt,  // quietPrompt
+        false,   // quietToLoud
+        true,    // skipWorldInfo
+        '',      // quietImage
+        '',      // quietName
+        700      // responseLength
+    );
 }
 
 async function analyze() {
@@ -656,20 +646,23 @@ Recent roleplay:
 ${transcript()}
             `.trim();
 
-            result = await c.generateQuietPrompt({
-                quietPrompt: retryPrompt,
-                skipWIAN: true,
-                responseLength: 700,
-                removeReasoning: true,
-                trimToSentence: false,
-            });
+            result = await c.generateQuietPrompt(
+                retryPrompt,
+                false,
+                true,
+                '',
+                '',
+                700
+            );
 
             console.debug('[Encountered NPCs] Raw retry response:', result);
             rows = parseAnalysis(result);
         }
 
         if (!rows.length) {
-            throw new Error('The model response could not be parsed. Open the browser console to see the raw response.');
+            const rawPreview = cleanModelText(result).slice(0, 500);
+            console.error('[Encountered NPCs] Unparsed model response preview:', rawPreview);
+            throw new Error('The model did not return any recognizable NPC rows.');
         }
 
         let changed = false;
