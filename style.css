@@ -1,0 +1,195 @@
+
+#enpc-panel {
+    position: fixed;
+    z-index: 3000;
+    top: 64px;
+    right: 10px;
+    width: min(360px, calc(100vw - 20px));
+    max-height: calc(100vh - 82px);
+    display: flex;
+    flex-direction: column;
+    color: var(--SmartThemeBodyColor);
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 92%, transparent);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 12px;
+    box-shadow: 0 10px 35px rgba(0,0,0,.35);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+}
+
+#enpc-panel.enpc-collapsed {
+    width: auto;
+}
+#enpc-panel.enpc-collapsed .enpc-body,
+#enpc-panel.enpc-collapsed .enpc-header strong,
+#enpc-panel.enpc-collapsed #enpc-count,
+#enpc-panel.enpc-collapsed #enpc-add {
+    display: none;
+}
+
+.enpc-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+.enpc-header button {
+    min-width: 30px;
+    min-height: 30px;
+    border: 0;
+    border-radius: 7px;
+    color: inherit;
+    background: rgba(255,255,255,.08);
+    cursor: pointer;
+}
+#enpc-count {
+    min-width: 24px;
+    padding: 2px 7px;
+    text-align: center;
+    border-radius: 999px;
+    background: rgba(255,255,255,.1);
+}
+
+.enpc-body {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 9px;
+}
+#enpc-search {
+    width: 100%;
+    margin-bottom: 7px;
+}
+.enpc-columns {
+    display: grid;
+    grid-template-columns: 38px minmax(90px, 1fr) minmax(100px, 1.15fr);
+    gap: 6px;
+    padding: 4px 8px 6px;
+    font-size: .72rem;
+    opacity: .62;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+#enpc-list {
+    overflow-y: auto;
+    min-height: 70px;
+    max-height: calc(100vh - 235px);
+}
+.enpc-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 38px minmax(90px, 1fr) minmax(100px, 1.15fr) auto;
+    gap: 6px;
+    align-items: center;
+    padding: 8px;
+    border: 0;
+    border-bottom: 1px solid rgba(255,255,255,.065);
+    color: inherit;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+.enpc-row:hover {
+    background: rgba(255,255,255,.07);
+}
+.enpc-status {
+    font-size: 1.2rem;
+    text-align: center;
+}
+.enpc-name {
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.enpc-relationship {
+    opacity: .82;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.enpc-lock {
+    font-size: .75rem;
+    opacity: .65;
+}
+.enpc-empty {
+    padding: 22px 8px;
+    text-align: center;
+    opacity: .65;
+}
+.enpc-footer {
+    display: flex;
+    gap: 7px;
+    margin-top: 8px;
+}
+.enpc-footer #enpc-analyze {
+    flex: 1;
+}
+
+.enpc-modal-overlay {
+    position: fixed;
+    z-index: 10001;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 15px;
+    background: rgba(0,0,0,.62);
+}
+.enpc-modal {
+    width: min(480px, 100%);
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 18px;
+    color: var(--SmartThemeBodyColor);
+    background: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 12px;
+    box-shadow: 0 15px 50px rgba(0,0,0,.45);
+}
+.enpc-modal h3 {
+    margin: 0 0 7px;
+}
+.enpc-modal label:not(.enpc-check) {
+    margin-top: 5px;
+    font-size: .82rem;
+    opacity: .78;
+}
+.enpc-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+}
+.enpc-modal-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+.enpc-spacer {
+    flex: 1;
+}
+.enpc-help {
+    margin: 4px 0;
+    font-size: .84rem;
+    line-height: 1.4;
+    opacity: .72;
+}
+
+@media (max-width: 800px) {
+    #enpc-panel {
+        top: auto;
+        bottom: 10px;
+        right: 10px;
+        max-height: 60vh;
+    }
+    #enpc-list {
+        max-height: calc(60vh - 155px);
+    }
+}
