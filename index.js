@@ -1,7 +1,7 @@
 const MODULE = 'encountered_npcs_v2';
 const STORAGE_PREFIX = `${MODULE}:chat:`;
 const SETTINGS_KEY = `${MODULE}:settings`;
-const VERSION = '1.0.2';
+const VERSION = '2.1.0';
 
 const STATUS_OPTIONS = [
     ['❓', 'Unknown'],
@@ -20,14 +20,14 @@ const DEFAULT_SETTINGS = {
     panelOpen: true,
     x: null,
     y: 72,
-    width: 620,
-    height: 420,
+    width: 700,
+    height: 460,
 };
 
 let data = blankData();
 let currentChatKey = '';
-let analyzing = false;
 let saveTimer = null;
+let scanRunning = false;
 
 function context() {
     return SillyTavern.getContext();
@@ -57,6 +57,10 @@ function normalizeText(value, maxLength, fallback = '') {
     return (text || fallback).slice(0, maxLength);
 }
 
+function normalizeMultiline(value, maxLength) {
+    return String(value ?? '').replace(/\r/g, '').trim().slice(0, maxLength);
+}
+
 function normalizeName(value) {
     return normalizeText(value, 80);
 }
@@ -66,7 +70,7 @@ function normalizeRelationship(value) {
 }
 
 function normalizeSummary(value) {
-    return normalizeText(value, 160);
+    return normalizeText(value, 220);
 }
 
 function inferStatus(status, relationship) {
@@ -126,6 +130,7 @@ function migrateNpc(npc) {
         status: inferStatus(npc?.status, relationship),
         relationship,
         summary: normalizeSummary(npc?.summary),
+        notes: normalizeMultiline(npc?.notes, 5000),
         locked: Boolean(npc?.locked),
         createdAt: Number(npc?.createdAt) || Date.now(),
         updatedAt: Number(npc?.updatedAt) || Date.now(),
@@ -163,47 +168,6 @@ function findNpcByName(name) {
     return data.npcs.find(npc => npc.name.toLocaleLowerCase() === key);
 }
 
-function upsertNpc(input, force = false) {
-    const name = normalizeName(input?.name);
-    if (!name) return false;
-
-    const relationship = normalizeRelationship(input?.relationship);
-    const summary = normalizeSummary(input?.summary);
-    const status = inferStatus(input?.status, relationship);
-    const existing = findNpcByName(name);
-
-    if (existing) {
-        if (existing.locked && !force) return false;
-
-        const nextSummary = summary || existing.summary || '';
-        const changed =
-            existing.name !== name ||
-            existing.status !== status ||
-            existing.relationship !== relationship ||
-            existing.summary !== nextSummary;
-
-        existing.name = name;
-        existing.status = status;
-        existing.relationship = relationship;
-        existing.summary = nextSummary;
-        existing.updatedAt = Date.now();
-        return changed;
-    }
-
-    data.npcs.push({
-        id: makeId(),
-        name,
-        status,
-        relationship,
-        summary,
-        locked: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-    });
-
-    return true;
-}
-
 function statusOptions(selected) {
     return STATUS_OPTIONS.map(([emoji, label]) =>
         `<option value="${emoji}" ${emoji === selected ? 'selected' : ''}>${emoji} ${escapeHtml(label)}</option>`
@@ -223,7 +187,8 @@ function render() {
             if (!query) return true;
             return npc.name.toLowerCase().includes(query)
                 || npc.relationship.toLowerCase().includes(query)
-                || npc.summary.toLowerCase().includes(query);
+                || npc.summary.toLowerCase().includes(query)
+                || npc.notes.toLowerCase().includes(query);
         })
         .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -238,7 +203,7 @@ function render() {
             <span class="enpc-name" title="${escapeHtml(npc.name)}">${escapeHtml(npc.name)}</span>
             <span class="enpc-relationship" title="${escapeHtml(npc.relationship)}">${escapeHtml(npc.relationship)}</span>
             <span class="enpc-summary" title="${escapeHtml(npc.summary)}">${escapeHtml(npc.summary || '—')}</span>
-            ${npc.locked ? '<span class="enpc-lock" title="Locked">🔒</span>' : '<span></span>'}
+            ${npc.locked ? '<span class="enpc-lock" title="Locked from scan updates">🔒</span>' : '<span></span>'}
         </button>
     `).join('');
 
@@ -267,12 +232,16 @@ function openEditor(id = null) {
                    value="${escapeHtml(npc?.relationship || 'Unknown')}" required>
 
             <label for="enpc-summary-input">Summary</label>
-            <textarea id="enpc-summary-input" maxlength="160" rows="3"
-                      placeholder="Short description of who this character is">${escapeHtml(npc?.summary || '')}</textarea>
+            <textarea id="enpc-summary-input" maxlength="220" rows="3"
+                      placeholder="Short description of this character">${escapeHtml(npc?.summary || '')}</textarea>
+
+            <label for="enpc-notes-input">Your Notes</label>
+            <textarea id="enpc-notes-input" maxlength="5000" rows="7"
+                      placeholder="Anything you want to remember. Scan never overwrites this field.">${escapeHtml(npc?.notes || '')}</textarea>
 
             <label class="enpc-check">
                 <input id="enpc-lock-input" type="checkbox" ${npc?.locked ? 'checked' : ''}>
-                Lock this character from automatic changes
+                Lock status, relationship, and summary from scan updates
             </label>
 
             <div class="enpc-actions">
@@ -301,6 +270,7 @@ function openEditor(id = null) {
             const name = normalizeName(overlay.querySelector('#enpc-name-input').value);
             const relationship = normalizeRelationship(overlay.querySelector('#enpc-relationship-input').value);
             const summary = normalizeSummary(overlay.querySelector('#enpc-summary-input').value);
+            const notes = normalizeMultiline(overlay.querySelector('#enpc-notes-input').value, 5000);
             const status = overlay.querySelector('#enpc-status-input').value;
             const locked = overlay.querySelector('#enpc-lock-input').checked;
 
@@ -309,17 +279,32 @@ function openEditor(id = null) {
                 return;
             }
 
+            const duplicate = findNpcByName(name);
+            if (duplicate && duplicate !== npc) {
+                toastr.warning('A character with that name already exists.');
+                return;
+            }
+
             if (npc) {
                 npc.name = name;
                 npc.status = status;
                 npc.relationship = relationship;
                 npc.summary = summary;
+                npc.notes = notes;
                 npc.locked = locked;
                 npc.updatedAt = Date.now();
             } else {
-                upsertNpc({ name, status, relationship, summary }, true);
-                const added = findNpcByName(name);
-                if (added) added.locked = locked;
+                data.npcs.push({
+                    id: makeId(),
+                    name,
+                    status,
+                    relationship,
+                    summary,
+                    notes,
+                    locked,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                });
             }
 
             persistData();
@@ -343,352 +328,167 @@ function openEditor(id = null) {
     setTimeout(() => overlay.querySelector('#enpc-name-input')?.focus(), 0);
 }
 
-function responseText(raw) {
-    if (typeof raw === 'string') return raw;
-    if (raw == null) return '';
+function getChatText() {
+    const c = context();
+    const messages = Array.isArray(c.chat) ? c.chat : [];
 
-    if (Array.isArray(raw)) {
-        return raw.map(responseText).filter(Boolean).join('\n');
-    }
-
-    if (typeof raw === 'object') {
-        const directKeys = [
-            'text',
-            'content',
-            'response',
-            'result',
-            'message',
-            'output',
-            'data',
-        ];
-
-        for (const key of directKeys) {
-            const value = raw[key];
-            if (typeof value === 'string') return value;
-            if (value && typeof value === 'object') {
-                const nested = responseText(value);
-                if (nested) return nested;
-            }
-        }
-
-        if (Array.isArray(raw.choices)) {
-            const choices = raw.choices
-                .map(choice => responseText(choice?.message?.content ?? choice?.text ?? choice))
-                .filter(Boolean);
-
-            if (choices.length) return choices.join('\n');
-        }
-
-        try {
-            return JSON.stringify(raw);
-        } catch {
-            return String(raw);
-        }
-    }
-
-    return String(raw);
+    return messages
+        .filter(message => message && message.mes)
+        .map(message => {
+            const speaker = message.is_user ? (c.name1 || 'User') : (message.name || c.name2 || 'Character');
+            const text = String(message.mes)
+                .replace(/<[^>]*>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            return `${speaker}: ${text}`;
+        })
+        .join('\n')
+        .slice(-45000);
 }
 
-function cleanModelText(raw) {
-    return responseText(raw)
-        .replace(/<think>[\s\S]*?<\/think>/gi, '')
-        .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
-        .replace(/```(?:json|javascript|js|text|txt|csv|tsv)?/gi, '')
-        .replace(/```/g, '')
-        .trim();
-}
-
-function normalizeParsedRow(row) {
-    if (!row || typeof row !== 'object') return null;
-
-    const name = normalizeName(
-        row.name ?? row.character ?? row.characterName ?? row.npc ?? row.full_name
-    );
-
-    if (!name) return null;
-
-    const relationship = normalizeRelationship(
-        row.relationship ?? row.relation ?? row.role ?? row.connection ?? 'Unknown'
-    );
-
-    const summary = normalizeSummary(
-        row.summary ?? row.description ?? row.note ?? row.details ?? row.identity ?? ''
-    );
-
-    return {
-        name,
-        status: inferStatus(row.status ?? row.emoji ?? row.icon, relationship),
-        relationship,
-        summary,
+function localScanNpcs() {
+    const c = context();
+    const messages = Array.isArray(c.chat) ? c.chat : [];
+    const excluded = new Set([
+        normalizeName(c.name1).toLowerCase(), normalizeName(c.name2).toLowerCase(),
+        'user','assistant','system','narrator','you','i','he','she','they','we'
+    ].filter(Boolean));
+    const counts = new Map();
+    const displayNames = new Map();
+    const addCandidate = (rawName, weight = 1) => {
+        const name = normalizeName(rawName).replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9'’ -]+$/, '').trim();
+        if (!name || name.length < 2 || name.length > 60) return;
+        const key = name.toLowerCase();
+        if (excluded.has(key)) return;
+        const words = name.split(/\\s+/);
+        if (words.length > 4 || /^\\d+$/.test(name) || /[<>={}\\[\\]\\\\]/.test(name)) return;
+        const blocked = new Set(['The','This','That','These','Those','Chapter','Scene','Later','Morning','Evening','Night','Today','Tomorrow','Yesterday','Unknown','Friend','Enemy','Master','Aunt','Uncle','Mother','Father','Sister','Brother','Lady','Lord','Miss','Mister']);
+        if (words.length === 1 && blocked.has(words[0])) return;
+        counts.set(key,(counts.get(key)||0)+weight);
+        if (!displayNames.has(key) || weight > 1) displayNames.set(key,name);
     };
+    for (const message of messages) {
+        if (!message || message.is_user) continue;
+        const speaker = normalizeName(message.name);
+        if (speaker && speaker.toLowerCase() !== normalizeName(c.name2).toLowerCase()) addCandidate(speaker,5);
+    }
+    const text = getChatText();
+    const patterns = [
+        /\\b(?:Aunt|Uncle|Lady|Lord|Master|Teacher|Doctor|Dr|Professor|Captain|General|Princess|Prince|Queen|King|Sister|Brother|Mother|Father|Miss|Mr|Mrs|Ms)\\s+[A-Z][A-Za-z'’-]+(?:\\s+[A-Z][A-Za-z'’-]+)?\\b/g,
+        /\\b[A-Z][A-Za-z'’-]{1,24}(?:\\s+[A-Z][A-Za-z'’-]{1,24}){1,2}\\b/g,
+    ];
+    for (const pattern of patterns) for (const match of text.matchAll(pattern)) addCandidate(match[0],1);
+    const rows=[...counts.entries()].filter(([,count])=>count>=2).map(([key,count])=>({name:displayNames.get(key),relationship:'Unknown',summary:'',status:'❓',_score:count})).sort((a,b)=>b._score-a._score||a.name.localeCompare(b.name)).slice(0,40).map(({_score,...row})=>row);
+    return normalizeScanRows(rows);
 }
 
-function parseAnalysis(raw) {
-    const text = cleanModelText(raw);
-    if (!text) return [];
+function openScanReview(rows) {
+    const overlay = document.createElement('div');
+    overlay.className = 'enpc-overlay';
 
-    const candidates = [text];
+    const cards = rows.map((row, index) => {
+        const existing = findNpcByName(row.name);
+        const locked = existing?.locked;
+        const label = existing ? (locked ? 'Existing · locked' : 'Existing · can update') : 'New character';
 
-    const firstObject = text.indexOf('{');
-    const lastObject = text.lastIndexOf('}');
-    if (firstObject >= 0 && lastObject > firstObject) {
-        candidates.push(text.slice(firstObject, lastObject + 1));
-    }
+        return `
+            <label class="enpc-scan-card ${locked ? 'enpc-scan-locked' : ''}">
+                <input class="enpc-scan-check" type="checkbox" data-index="${index}" ${locked ? '' : 'checked'}>
+                <span class="enpc-scan-emoji">${escapeHtml(row.status)}</span>
+                <span class="enpc-scan-info">
+                    <strong>${escapeHtml(row.name)}</strong>
+                    <small>${escapeHtml(label)}</small>
+                    <span>${escapeHtml(row.relationship)} · ${escapeHtml(row.summary || 'No summary')}</span>
+                </span>
+            </label>
+        `;
+    }).join('');
 
-    const firstArray = text.indexOf('[');
-    const lastArray = text.lastIndexOf(']');
-    if (firstArray >= 0 && lastArray > firstArray) {
-        candidates.push(text.slice(firstArray, lastArray + 1));
-    }
+    overlay.innerHTML = `
+        <div class="enpc-modal enpc-scan-modal">
+            <h3>Scan Results</h3>
+            <p class="enpc-help">Choose the names to save. Existing unlocked characters update status, relationship, and summary. Your notes are never overwritten.</p>
+            <div class="enpc-scan-list">${cards}</div>
+            <div class="enpc-actions enpc-scan-actions">
+                <span></span>
+                <span></span>
+                <button id="enpc-scan-cancel" type="button" class="menu_button">Cancel</button>
+                <button id="enpc-scan-import" type="button" class="menu_button">Save Selected</button>
+            </div>
+        </div>
+    `;
 
-    for (const candidate of candidates) {
-        try {
-            const parsed = JSON.parse(candidate);
-            const rows = Array.isArray(parsed)
-                ? parsed
-                : parsed?.npcs ?? parsed?.characters ?? parsed?.results ?? parsed?.data;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
 
-            if (Array.isArray(rows)) {
-                return rows.map(normalizeParsedRow).filter(Boolean);
+    overlay.querySelector('#enpc-scan-cancel').addEventListener('click', close);
+    overlay.addEventListener('mousedown', event => {
+        if (event.target === overlay) close();
+    });
+
+    overlay.querySelector('#enpc-scan-import').addEventListener('click', () => {
+        const selected = [...overlay.querySelectorAll('.enpc-scan-check:checked')]
+            .map(input => rows[Number(input.dataset.index)])
+            .filter(Boolean);
+
+        if (!selected.length) {
+            toastr.warning('Select at least one character.');
+            return;
+        }
+
+        let added = 0;
+        let updated = 0;
+        let skipped = 0;
+
+        for (const row of selected) {
+            const existing = findNpcByName(row.name);
+
+            if (existing) {
+                if (existing.locked) {
+                    skipped++;
+                    continue;
+                }
+
+                existing.status = row.status;
+                existing.relationship = row.relationship;
+                if (row.summary) existing.summary = row.summary;
+                existing.updatedAt = Date.now();
+                updated++;
+            } else {
+                data.npcs.push({
+                    id: makeId(),
+                    ...row,
+                    notes: '',
+                    locked: false,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                });
+                added++;
             }
-
-            const one = normalizeParsedRow(parsed);
-            if (one) return [one];
-        } catch {}
-    }
-
-    const rows = [];
-    const lines = text.split(/\r?\n/);
-
-    for (let rawLine of lines) {
-        let line = rawLine.trim();
-        if (!line) continue;
-
-        // Ignore table separators and common headers.
-        if (/^\|?\s*:?-{2,}/.test(line)) continue;
-        if (/^\|?\s*(status|emoji|icon)\s*\|/i.test(line)) continue;
-        if (/^\s*(name|character)\s*[:|]\s*(relationship|relation)/i.test(line)) continue;
-
-        line = line
-            .replace(/^[\s>*#•]+/, '')
-            .replace(/^\d+[.)]\s*/, '')
-            .replace(/\*\*/g, '')
-            .replace(/`/g, '')
-            .trim();
-
-        // Markdown/pipe table: | emoji | Name | Relationship | Summary |
-        if (line.includes('|')) {
-            const parts = line
-                .split('|')
-                .map(part => part.trim())
-                .filter(Boolean);
-
-            if (parts.length >= 4 && STATUS_OPTIONS.some(([emoji]) => emoji === parts[0])) {
-                rows.push(normalizeParsedRow({
-                    status: parts[0],
-                    name: parts[1],
-                    relationship: parts[2],
-                    summary: parts.slice(3).join(' | '),
-                }));
-                continue;
-            }
-
-            if (parts.length >= 3) {
-                rows.push(normalizeParsedRow({
-                    name: parts[0],
-                    relationship: parts[1],
-                    summary: parts.slice(2).join(' | '),
-                }));
-                continue;
-            }
         }
 
-        // Tab-separated output.
-        const tabs = line.split(/\t+/).map(part => part.trim()).filter(Boolean);
-        if (tabs.length >= 4 && STATUS_OPTIONS.some(([emoji]) => emoji === tabs[0])) {
-            rows.push(normalizeParsedRow({
-                status: tabs[0],
-                name: tabs[1],
-                relationship: tabs[2],
-                summary: tabs.slice(3).join(' '),
-            }));
-            continue;
-        }
-
-        // Emoji — Name — Relationship — Summary
-        const dash = line.split(/\s+(?:—|–|-)\s+/).map(part => part.trim()).filter(Boolean);
-        if (dash.length >= 4 && STATUS_OPTIONS.some(([emoji]) => emoji === dash[0])) {
-            rows.push(normalizeParsedRow({
-                status: dash[0],
-                name: dash[1],
-                relationship: dash[2],
-                summary: dash.slice(3).join(' — '),
-            }));
-            continue;
-        }
-
-        // Name: X; Relationship: Y; Summary: Z; Status: emoji
-        const nameMatch = line.match(/(?:name|character)\s*:\s*([^;]+)/i);
-        const relationshipMatch = line.match(/(?:relationship|relation|role)\s*:\s*([^;]+)/i);
-        const summaryMatch = line.match(/(?:summary|description|note)\s*:\s*([^;]+)/i);
-        const statusMatch = line.match(/(?:status|emoji|icon)\s*:\s*([^\s;]+)/i);
-
-        if (nameMatch && relationshipMatch) {
-            rows.push(normalizeParsedRow({
-                name: nameMatch[1],
-                relationship: relationshipMatch[1],
-                summary: summaryMatch?.[1] || '',
-                status: statusMatch?.[1] || '',
-            }));
-        }
-    }
-
-    return rows.filter(Boolean);
+        persistData();
+        render();
+        toastr.success(`Saved ${added} new and updated ${updated}${skipped ? `; skipped ${skipped} locked` : ''}.`);
+        close();
+    });
 }
 
-function transcript() {
-    const chat = context().chat || [];
-
-    return chat.slice(-16).map(message => {
-        const speaker = message.is_user ? 'PLAYER' : (message.name || 'NARRATOR');
-        return `${speaker}: ${String(message.mes || '').slice(0, 5000)}`;
-    }).join('\n\n');
-}
-
-async function requestCharacterAnalysis(prompt) {
-    const c = context();
-
-    // SillyTavern versions differ here. The most compatible form is the
-    // positional signature with the prompt string as the first argument.
-    // Passing an options object to older builds can make the model receive
-    // "[object Object]" instead of the actual instructions.
-    return await c.generateQuietPrompt(
-        prompt,  // quietPrompt
-        false,   // quietToLoud
-        true,    // skipWorldInfo
-        '',      // quietImage
-        '',      // quietName
-        700      // responseLength
-    );
-}
-
-async function analyze() {
-    if (analyzing) return;
-
-    const c = context();
-    if (!c.chat?.length) {
-        toastr.info('There is no chat to analyze.');
-        return;
-    }
-
-    analyzing = true;
-    const button = document.querySelector('#enpc-analyze');
-
-    if (button) {
-        button.disabled = true;
-        button.textContent = 'Analyzing…';
-    }
-
+async function scanNpcs() {
+    if (scanRunning) return;
+    const button = document.querySelector('#enpc-scan');
+    scanRunning = true;
+    if (button) { button.disabled = true; button.textContent = 'Scanning chat…'; }
     try {
-        const existing = data.npcs.map(npc => ({
-            name: npc.name,
-            status: npc.status,
-            relationship: npc.relationship,
-            summary: npc.summary,
-            locked: npc.locked,
-        }));
-
-        const prompt = `
-Read the recent roleplay and update the named NPC list.
-
-Return ONLY this JSON shape:
-{"npcs":[{"name":"Name","status":"❓","relationship":"Short label","summary":"One short sentence."}]}
-
-Allowed status values: ❓ 😐 😊 🤝 ❤️ 👑 🎓 😠 ⚔️ 💀
-
-Requirements:
-- Include named NPCs only.
-- Do not include the player, narrator, locations, organizations, titles without names, or unnamed groups.
-- Relationship examples: Aunt, Friend, Master, Enemy, Fiancée, Stranger.
-- Summary must identify the NPC or explain why they matter.
-- Summary must be no more than 160 characters.
-- Keep useful existing data unless the story clearly changes it.
-- Never change locked entries.
-- Do not invent names.
-- Return no explanation and no markdown.
-
-Existing tracker:
-${JSON.stringify(existing)}
-
-Recent roleplay:
-${transcript()}
-        `.trim();
-
-        let result = await requestCharacterAnalysis(prompt);
-        console.debug('[Encountered NPCs] Raw analysis response:', result);
-
-        let rows = parseAnalysis(result);
-
-        // Some local roleplay models ignore JSON. Retry using a very simple line format.
-        if (!rows.length) {
-            const retryPrompt = `
-Extract named NPCs from the roleplay below.
-
-Output one NPC per line exactly like:
-❓ | Name | Relationship | Short summary
-
-Use only these first-column emojis:
-❓ 😐 😊 🤝 ❤️ 👑 🎓 😠 ⚔️ 💀
-
-Do not output headers, numbering, explanations, code fences, the player, narrator, places, factions, or unnamed people.
-
-Recent roleplay:
-${transcript()}
-            `.trim();
-
-            result = await c.generateQuietPrompt(
-                retryPrompt,
-                false,
-                true,
-                '',
-                '',
-                700
-            );
-
-            console.debug('[Encountered NPCs] Raw retry response:', result);
-            rows = parseAnalysis(result);
-        }
-
-        if (!rows.length) {
-            const rawPreview = cleanModelText(result).slice(0, 500);
-            console.error('[Encountered NPCs] Unparsed model response preview:', rawPreview);
-            throw new Error('The model did not return any recognizable NPC rows.');
-        }
-
-        let changed = false;
-        for (const row of rows.slice(0, 200)) {
-            changed = upsertNpc(row) || changed;
-        }
-
-        if (changed) {
-            persistData();
-            render();
-            toastr.success(`Updated ${rows.length} character(s).`);
-        } else {
-            toastr.info('No character changes found.');
-        }
+        const rows = localScanNpcs();
+        if (!rows.length) { toastr.info('No likely NPC names were found in the current chat. You can still add one manually.'); return; }
+        openScanReview(rows);
     } catch (error) {
-        console.error('[Encountered NPCs]', error);
-        toastr.error(`Character analysis failed: ${error.message}`, '', {
-            preventDuplicates: true,
-        });
+        console.error('[Encountered NPCs] Local scan failed:', error);
+        toastr.error(`Local NPC scan failed: ${error.message}`);
     } finally {
-        analyzing = false;
-
-        if (button) {
-            button.disabled = false;
-            button.textContent = 'Analyze now';
-        }
+        scanRunning = false;
+        if (button) { button.disabled = false; button.textContent = '🔍 Scan Chat'; }
     }
 }
 
@@ -766,8 +566,8 @@ function buildPanel() {
     const panel = document.createElement('aside');
     panel.id = 'enpc-panel';
     panel.className = settings.panelOpen ? '' : 'enpc-collapsed';
-    panel.style.width = `${Math.max(460, settings.width)}px`;
-    panel.style.height = `${Math.max(240, settings.height)}px`;
+    panel.style.width = `${Math.max(500, settings.width)}px`;
+    panel.style.height = `${Math.max(260, settings.height)}px`;
     panel.style.top = `${Math.max(0, settings.y)}px`;
 
     if (Number.isFinite(settings.x)) {
@@ -784,7 +584,10 @@ function buildPanel() {
         </div>
 
         <div class="enpc-body">
-            <input id="enpc-search" type="search" placeholder="Search characters…">
+            <div class="enpc-toolbar">
+                <button id="enpc-scan" type="button" class="menu_button">🔍 Scan Chat</button>
+                <input id="enpc-search" type="search" placeholder="Search name, relationship, summary, or notes…">
+            </div>
 
             <div class="enpc-columns">
                 <span>Status</span>
@@ -797,8 +600,7 @@ function buildPanel() {
             <div id="enpc-list"></div>
 
             <div class="enpc-footer">
-                <button id="enpc-analyze" type="button" class="menu_button">Analyze now</button>
-                <button id="enpc-reset-position" type="button" class="menu_button" title="Reset position">⌖</button>
+                <button id="enpc-reset-position" type="button" class="menu_button" title="Reset panel position and size">Reset panel</button>
             </div>
         </div>
     `;
@@ -816,8 +618,8 @@ function buildPanel() {
     });
 
     panel.querySelector('#enpc-add').addEventListener('click', () => openEditor());
+    panel.querySelector('#enpc-scan').addEventListener('click', scanNpcs);
     panel.querySelector('#enpc-search').addEventListener('input', render);
-    panel.querySelector('#enpc-analyze').addEventListener('click', analyze);
 
     panel.querySelector('#enpc-reset-position').addEventListener('click', () => {
         const next = { ...DEFAULT_SETTINGS };

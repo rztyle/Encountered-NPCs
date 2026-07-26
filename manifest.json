@@ -4,7 +4,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "rztyle",
-  "version": "1.0.2",
+  "version": "2.1.0",
   "homePage": "https://github.com/rztyle/Encountered-NPCs",
   "auto_update": true,
   "minimum_client_version": "1.12.0"
