@@ -1,21 +1,19 @@
 # Encountered NPCs for SillyTavern
 
-A compact universal NPC tracker displaying only:
+A compact universal NPC tracker with four simple columns:
 
-**Status · Name · Relationship**
+**Status · Name · Relationship · Summary**
 
-## Version 0.2.1
+## Version 0.3.0
 
-- Fixed Add/Save on plain HTTP LAN servers where `crypto.randomUUID()` is unavailable.
-- Added visible error reporting if saving fails.
-- Added draggable title bar.
-- Added resizable panel.
-- Remembers panel position and size.
-- Added a reset-position button.
-- Made model output parsing tolerate strings, object-shaped responses, JSON, fenced JSON, and simple text rows.
-- Added a fallback scanner that detects repeated named NPCs directly from recent chat when the model returns no usable list.
-- Automatic analysis is manual by default to avoid repeated errors and extra generations.
-- Keeps separate NPC data for each chat.
+- Added a short Summary field.
+- Main panel now shows Status, Name, Relationship, and Summary.
+- Add/Edit window includes Summary.
+- Search now includes summaries.
+- Model analysis now requests short summaries.
+- Fallback chat scanning creates a basic summary when the model returns no usable list.
+- Keeps the draggable and resizable panel from v0.2.x.
+- Keeps the plain-HTTP save fix.
 
 ## Install
 
@@ -27,29 +25,42 @@ In SillyTavern:
 
    `https://github.com/rztyle/Encountered-NPCs`
 
-4. Install and hard-refresh the page.
+4. Install and hard-refresh.
 
-## Update an existing local clone
+## Update your Git repository
 
-Replace `index.js`, `style.css`, `manifest.json`, and `README.md`, then run:
+Replace the files in your local repository, then run:
 
-```bash
+```fish
+cd ~/Projects/Encountered-NPCs
 git add .
-git commit -m "Fix saving, parsing, and add movable panel"
+git commit -m "Add NPC summary column"
 git push
 ```
 
-In SillyTavern, open Extensions and select **Update** for Encountered NPCs, then hard-refresh.
+Then in SillyTavern click **Update** for Encountered NPCs and hard-refresh with `Ctrl + Shift + R`.
 
 ## Usage
 
 - Drag the title bar to move the panel.
-- Drag the lower-right edge to resize it.
-- Press **＋** to manually add an NPC.
-- Click an NPC row to edit, lock, or delete it.
-- Use **Analyze now** for model-assisted detection.
+- Resize from the lower-right edge.
+- Press **＋** to add an NPC.
+- Click a row to edit Status, Name, Relationship, Summary, or Lock.
+- Press **Analyze now** to scan the roleplay.
 - Press **⌖** to reset panel position and size.
 
-## Storage
+## Data format
 
-Version 0.2.1 uses browser `localStorage`, separated by chat. This fixes the save failure seen with chat metadata on some SillyTavern builds. Browser storage means the list is tied to that browser/profile unless exported in a later version.
+Each NPC stores:
+
+```json
+{
+  "name": "Bai Lian",
+  "status": "😊",
+  "relationship": "Friend",
+  "summary": "Playful fox princess who trusts Yuan.",
+  "locked": false
+}
+```
+
+Summary is limited to 120 characters.
