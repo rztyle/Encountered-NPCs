@@ -1,664 +1,560 @@
-const MODULE = 'encountered_npcs_v2';
-const STORAGE_PREFIX = `${MODULE}:chat:`;
-const SETTINGS_KEY = `${MODULE}:settings`;
-const VERSION = '2.1.0';
+const ENPC = (() => {
+    'use strict';
 
-const STATUS_OPTIONS = [
-    ['❓', 'Unknown'],
-    ['😐', 'Neutral'],
-    ['😊', 'Friend'],
-    ['🤝', 'Ally'],
-    ['❤️', 'Romance'],
-    ['👑', 'Family'],
-    ['🎓', 'Mentor'],
-    ['😠', 'Rival'],
-    ['⚔️', 'Enemy'],
-    ['💀', 'Dead'],
-];
+    const MODULE = 'encountered_npcs';
+    const STORAGE_KEY = `${MODULE}_v2`;
+    let panel;
+    let editor;
+    let scanDialog;
+    let selectedId = null;
 
-const DEFAULT_SETTINGS = {
-    panelOpen: true,
-    x: null,
-    y: 72,
-    width: 700,
-    height: 460,
-};
-
-let data = blankData();
-let currentChatKey = '';
-let saveTimer = null;
-let scanRunning = false;
-
-function context() {
-    return SillyTavern.getContext();
-}
-
-function blankData() {
-    return { npcs: [], updatedAt: Date.now() };
-}
-
-function makeId() {
-    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-
-    if (globalThis.crypto?.getRandomValues) {
-        const bytes = new Uint8Array(16);
-        globalThis.crypto.getRandomValues(bytes);
-        bytes[6] = (bytes[6] & 0x0f) | 0x40;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        const hex = [...bytes].map(v => v.toString(16).padStart(2, '0'));
-        return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`;
-    }
-
-    return `enpc-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}
-
-function normalizeText(value, maxLength, fallback = '') {
-    const text = String(value ?? '').trim().replace(/\s+/g, ' ');
-    return (text || fallback).slice(0, maxLength);
-}
-
-function normalizeMultiline(value, maxLength) {
-    return String(value ?? '').replace(/\r/g, '').trim().slice(0, maxLength);
-}
-
-function normalizeName(value) {
-    return normalizeText(value, 80);
-}
-
-function normalizeRelationship(value) {
-    return normalizeText(value, 80, 'Unknown');
-}
-
-function normalizeSummary(value) {
-    return normalizeText(value, 220);
-}
-
-function inferStatus(status, relationship) {
-    const raw = String(status ?? '').trim();
-    if (STATUS_OPTIONS.some(([emoji]) => emoji === raw)) return raw;
-
-    const text = `${raw} ${relationship}`.toLowerCase();
-
-    if (/(dead|deceased|killed)/.test(text)) return '💀';
-    if (/(enemy|hostile|villain|antagonist)/.test(text)) return '⚔️';
-    if (/(rival|competitor)/.test(text)) return '😠';
-    if (/(master|mentor|teacher|sensei|shifu)/.test(text)) return '🎓';
-    if (/(mother|father|sister|brother|aunt|uncle|cousin|daughter|son|family|wife|husband|spouse)/.test(text)) return '👑';
-    if (/(lover|girlfriend|boyfriend|romance|romantic|fianc|crush)/.test(text)) return '❤️';
-    if (/(ally|companion|teammate)/.test(text)) return '🤝';
-    if (/(friend|friendly|best friend)/.test(text)) return '😊';
-    if (/(neutral|acquaintance|stranger|encountered)/.test(text)) return '😐';
-
-    return '❓';
-}
-
-function loadSettings() {
-    try {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
-    } catch {
-        return { ...DEFAULT_SETTINGS };
-    }
-}
-
-function saveSettings(settings) {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-}
-
-function getChatKey() {
-    const c = context();
-    const stable = c.chatId ?? c.chat_id ?? c.chatFile ?? c.chat_file_name;
-    if (stable) return String(stable);
-
-    const character = c.characterId ?? c.character_id ?? c.name2 ?? 'character';
-    const firstMessage = Array.isArray(c.chat) && c.chat.length
-        ? String(c.chat[0]?.mes || '').slice(0, 120)
-        : 'empty';
-
-    return `${character}:${firstMessage}`;
-}
-
-function storageKey() {
-    currentChatKey = getChatKey();
-    return STORAGE_PREFIX + encodeURIComponent(currentChatKey);
-}
-
-function migrateNpc(npc) {
-    const relationship = normalizeRelationship(npc?.relationship);
-    return {
-        id: npc?.id || makeId(),
-        name: normalizeName(npc?.name),
-        status: inferStatus(npc?.status, relationship),
-        relationship,
-        summary: normalizeSummary(npc?.summary),
-        notes: normalizeMultiline(npc?.notes, 5000),
-        locked: Boolean(npc?.locked),
-        createdAt: Number(npc?.createdAt) || Date.now(),
-        updatedAt: Number(npc?.updatedAt) || Date.now(),
-    };
-}
-
-function loadData() {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(storageKey()) || 'null');
-        if (!parsed || !Array.isArray(parsed.npcs)) return blankData();
-
-        return {
-            npcs: parsed.npcs.map(migrateNpc).filter(npc => npc.name),
-            updatedAt: Number(parsed.updatedAt) || Date.now(),
-        };
-    } catch (error) {
-        console.error('[Encountered NPCs] Failed to load data:', error);
-        return blankData();
-    }
-}
-
-function persistData() {
-    data.updatedAt = Date.now();
-    localStorage.setItem(storageKey(), JSON.stringify(data));
-}
-
-function escapeHtml(value) {
-    const node = document.createElement('div');
-    node.textContent = String(value ?? '');
-    return node.innerHTML;
-}
-
-function findNpcByName(name) {
-    const key = normalizeName(name).toLocaleLowerCase();
-    return data.npcs.find(npc => npc.name.toLocaleLowerCase() === key);
-}
-
-function statusOptions(selected) {
-    return STATUS_OPTIONS.map(([emoji, label]) =>
-        `<option value="${emoji}" ${emoji === selected ? 'selected' : ''}>${emoji} ${escapeHtml(label)}</option>`
-    ).join('');
-}
-
-function render() {
-    const list = document.querySelector('#enpc-list');
-    const count = document.querySelector('#enpc-count');
-    if (!list || !count) return;
-
-    count.textContent = String(data.npcs.length);
-
-    const query = normalizeText(document.querySelector('#enpc-search')?.value, 200).toLowerCase();
-    const rows = [...data.npcs]
-        .filter(npc => {
-            if (!query) return true;
-            return npc.name.toLowerCase().includes(query)
-                || npc.relationship.toLowerCase().includes(query)
-                || npc.summary.toLowerCase().includes(query)
-                || npc.notes.toLowerCase().includes(query);
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-    if (!rows.length) {
-        list.innerHTML = '<div class="enpc-empty">No characters found.</div>';
-        return;
-    }
-
-    list.innerHTML = rows.map(npc => `
-        <button class="enpc-row" data-id="${escapeHtml(npc.id)}" type="button">
-            <span class="enpc-status">${escapeHtml(npc.status)}</span>
-            <span class="enpc-name" title="${escapeHtml(npc.name)}">${escapeHtml(npc.name)}</span>
-            <span class="enpc-relationship" title="${escapeHtml(npc.relationship)}">${escapeHtml(npc.relationship)}</span>
-            <span class="enpc-summary" title="${escapeHtml(npc.summary)}">${escapeHtml(npc.summary || '—')}</span>
-            ${npc.locked ? '<span class="enpc-lock" title="Locked from scan updates">🔒</span>' : '<span></span>'}
-        </button>
-    `).join('');
-
-    list.querySelectorAll('.enpc-row').forEach(row => {
-        row.addEventListener('click', () => openEditor(row.dataset.id));
-    });
-}
-
-function openEditor(id = null) {
-    const npc = id ? data.npcs.find(item => item.id === id) : null;
-    const overlay = document.createElement('div');
-    overlay.className = 'enpc-overlay';
-
-    overlay.innerHTML = `
-        <form class="enpc-modal">
-            <h3>${npc ? 'Edit Character' : 'Add Character'}</h3>
-
-            <label for="enpc-name-input">Name</label>
-            <input id="enpc-name-input" type="text" maxlength="80" value="${escapeHtml(npc?.name || '')}" required>
-
-            <label for="enpc-status-input">Status</label>
-            <select id="enpc-status-input">${statusOptions(npc?.status || '❓')}</select>
-
-            <label for="enpc-relationship-input">Relationship</label>
-            <input id="enpc-relationship-input" type="text" maxlength="80"
-                   value="${escapeHtml(npc?.relationship || 'Unknown')}" required>
-
-            <label for="enpc-summary-input">Summary</label>
-            <textarea id="enpc-summary-input" maxlength="220" rows="3"
-                      placeholder="Short description of this character">${escapeHtml(npc?.summary || '')}</textarea>
-
-            <label for="enpc-notes-input">Your Notes</label>
-            <textarea id="enpc-notes-input" maxlength="5000" rows="7"
-                      placeholder="Anything you want to remember. Scan never overwrites this field.">${escapeHtml(npc?.notes || '')}</textarea>
-
-            <label class="enpc-check">
-                <input id="enpc-lock-input" type="checkbox" ${npc?.locked ? 'checked' : ''}>
-                Lock status, relationship, and summary from scan updates
-            </label>
-
-            <div class="enpc-actions">
-                ${npc ? '<button id="enpc-delete" type="button" class="menu_button redWarningBG">Delete</button>' : '<span></span>'}
-                <span></span>
-                <button id="enpc-cancel" type="button" class="menu_button">Cancel</button>
-                <button type="submit" class="menu_button">Save</button>
-            </div>
-        </form>
-    `;
-
-    document.body.appendChild(overlay);
-
-    const close = () => overlay.remove();
-    const form = overlay.querySelector('form');
-
-    overlay.querySelector('#enpc-cancel').addEventListener('click', close);
-    overlay.addEventListener('mousedown', event => {
-        if (event.target === overlay) close();
+    const emptyCharacter = () => ({
+        id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        status: '',
+        name: '',
+        relationship: '',
+        age: '',
+        sex: '',
+        summary: '',
+        notes: '',
     });
 
-    form.addEventListener('submit', event => {
-        event.preventDefault();
+    function context() {
+        return globalThis.SillyTavern?.getContext?.() || {};
+    }
 
-        try {
-            const name = normalizeName(overlay.querySelector('#enpc-name-input').value);
-            const relationship = normalizeRelationship(overlay.querySelector('#enpc-relationship-input').value);
-            const summary = normalizeSummary(overlay.querySelector('#enpc-summary-input').value);
-            const notes = normalizeMultiline(overlay.querySelector('#enpc-notes-input').value, 5000);
-            const status = overlay.querySelector('#enpc-status-input').value;
-            const locked = overlay.querySelector('#enpc-lock-input').checked;
+    function toast(type, message) {
+        const t = globalThis.toastr;
+        if (t?.[type]) t[type](message);
+        else console[type === 'error' ? 'error' : 'log'](`[Encountered NPCs] ${message}`);
+    }
 
-            if (!name) {
-                toastr.warning('Enter a character name.');
-                return;
-            }
-
-            const duplicate = findNpcByName(name);
-            if (duplicate && duplicate !== npc) {
-                toastr.warning('A character with that name already exists.');
-                return;
-            }
-
-            if (npc) {
-                npc.name = name;
-                npc.status = status;
-                npc.relationship = relationship;
-                npc.summary = summary;
-                npc.notes = notes;
-                npc.locked = locked;
-                npc.updatedAt = Date.now();
-            } else {
-                data.npcs.push({
-                    id: makeId(),
-                    name,
-                    status,
-                    relationship,
-                    summary,
-                    notes,
-                    locked,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                });
-            }
-
-            persistData();
-            render();
-            toastr.success('Character saved.');
-            close();
-        } catch (error) {
-            console.error('[Encountered NPCs] Save failed:', error);
-            toastr.error(`Save failed: ${error.message}`);
+    function chatKey() {
+        const ctx = context();
+        const direct = ctx.chatId || ctx.chat_id || ctx.chatMetadata?.chat_id || ctx.chatMetadata?.chatId;
+        if (direct) return `chat:${direct}`;
+        if (ctx.groupId != null) return `group:${ctx.groupId}`;
+        if (ctx.characterId != null) {
+            const c = ctx.characters?.[ctx.characterId];
+            return `character:${c?.avatar || c?.name || ctx.characterId}`;
         }
-    });
-
-    overlay.querySelector('#enpc-delete')?.addEventListener('click', () => {
-        data.npcs = data.npcs.filter(item => item.id !== npc.id);
-        persistData();
-        render();
-        toastr.success('Character deleted.');
-        close();
-    });
-
-    setTimeout(() => overlay.querySelector('#enpc-name-input')?.focus(), 0);
-}
-
-function getChatText() {
-    const c = context();
-    const messages = Array.isArray(c.chat) ? c.chat : [];
-
-    return messages
-        .filter(message => message && message.mes)
-        .map(message => {
-            const speaker = message.is_user ? (c.name1 || 'User') : (message.name || c.name2 || 'Character');
-            const text = String(message.mes)
-                .replace(/<[^>]*>/g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim();
-            return `${speaker}: ${text}`;
-        })
-        .join('\n')
-        .slice(-45000);
-}
-
-function localScanNpcs() {
-    const c = context();
-    const messages = Array.isArray(c.chat) ? c.chat : [];
-    const excluded = new Set([
-        normalizeName(c.name1).toLowerCase(), normalizeName(c.name2).toLowerCase(),
-        'user','assistant','system','narrator','you','i','he','she','they','we'
-    ].filter(Boolean));
-    const counts = new Map();
-    const displayNames = new Map();
-    const addCandidate = (rawName, weight = 1) => {
-        const name = normalizeName(rawName).replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9'’ -]+$/, '').trim();
-        if (!name || name.length < 2 || name.length > 60) return;
-        const key = name.toLowerCase();
-        if (excluded.has(key)) return;
-        const words = name.split(/\\s+/);
-        if (words.length > 4 || /^\\d+$/.test(name) || /[<>={}\\[\\]\\\\]/.test(name)) return;
-        const blocked = new Set(['The','This','That','These','Those','Chapter','Scene','Later','Morning','Evening','Night','Today','Tomorrow','Yesterday','Unknown','Friend','Enemy','Master','Aunt','Uncle','Mother','Father','Sister','Brother','Lady','Lord','Miss','Mister']);
-        if (words.length === 1 && blocked.has(words[0])) return;
-        counts.set(key,(counts.get(key)||0)+weight);
-        if (!displayNames.has(key) || weight > 1) displayNames.set(key,name);
-    };
-    for (const message of messages) {
-        if (!message || message.is_user) continue;
-        const speaker = normalizeName(message.name);
-        if (speaker && speaker.toLowerCase() !== normalizeName(c.name2).toLowerCase()) addCandidate(speaker,5);
+        return `page:${location.pathname}`;
     }
-    const text = getChatText();
-    const patterns = [
-        /\\b(?:Aunt|Uncle|Lady|Lord|Master|Teacher|Doctor|Dr|Professor|Captain|General|Princess|Prince|Queen|King|Sister|Brother|Mother|Father|Miss|Mr|Mrs|Ms)\\s+[A-Z][A-Za-z'’-]+(?:\\s+[A-Z][A-Za-z'’-]+)?\\b/g,
-        /\\b[A-Z][A-Za-z'’-]{1,24}(?:\\s+[A-Z][A-Za-z'’-]{1,24}){1,2}\\b/g,
-    ];
-    for (const pattern of patterns) for (const match of text.matchAll(pattern)) addCandidate(match[0],1);
-    const rows=[...counts.entries()].filter(([,count])=>count>=2).map(([key,count])=>({name:displayNames.get(key),relationship:'Unknown',summary:'',status:'❓',_score:count})).sort((a,b)=>b._score-a._score||a.name.localeCompare(b.name)).slice(0,40).map(({_score,...row})=>row);
-    return normalizeScanRows(rows);
-}
 
-function openScanReview(rows) {
-    const overlay = document.createElement('div');
-    overlay.className = 'enpc-overlay';
+    function loadAll() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
 
-    const cards = rows.map((row, index) => {
-        const existing = findNpcByName(row.name);
-        const locked = existing?.locked;
-        const label = existing ? (locked ? 'Existing · locked' : 'Existing · can update') : 'New character';
+    function loadCharacters() {
+        const all = loadAll();
+        const list = all[chatKey()];
+        return Array.isArray(list) ? list.map(normalizeCharacter) : [];
+    }
 
-        return `
-            <label class="enpc-scan-card ${locked ? 'enpc-scan-locked' : ''}">
-                <input class="enpc-scan-check" type="checkbox" data-index="${index}" ${locked ? '' : 'checked'}>
-                <span class="enpc-scan-emoji">${escapeHtml(row.status)}</span>
-                <span class="enpc-scan-info">
-                    <strong>${escapeHtml(row.name)}</strong>
-                    <small>${escapeHtml(label)}</small>
-                    <span>${escapeHtml(row.relationship)} · ${escapeHtml(row.summary || 'No summary')}</span>
-                </span>
-            </label>
-        `;
-    }).join('');
+    function normalizeCharacter(value) {
+        return {
+            ...emptyCharacter(),
+            ...(value || {}),
+            id: value?.id || emptyCharacter().id,
+        };
+    }
 
-    overlay.innerHTML = `
-        <div class="enpc-modal enpc-scan-modal">
-            <h3>Scan Results</h3>
-            <p class="enpc-help">Choose the names to save. Existing unlocked characters update status, relationship, and summary. Your notes are never overwritten.</p>
-            <div class="enpc-scan-list">${cards}</div>
-            <div class="enpc-actions enpc-scan-actions">
-                <span></span>
-                <span></span>
-                <button id="enpc-scan-cancel" type="button" class="menu_button">Cancel</button>
-                <button id="enpc-scan-import" type="button" class="menu_button">Save Selected</button>
+    function saveCharacters(characters) {
+        const all = loadAll();
+        all[chatKey()] = characters;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    }
+
+    function escapeHtml(value = '') {
+        const node = document.createElement('div');
+        node.textContent = String(value);
+        return node.innerHTML;
+    }
+
+    function createUi() {
+        if (document.getElementById('enpc-root')) return;
+
+        document.body.insertAdjacentHTML('beforeend', `
+            <button id="enpc-open" class="enpc-floating" type="button" title="Encountered NPCs" aria-label="Open Encountered NPCs">
+                <i class="fa-solid fa-address-book"></i>
+            </button>
+
+            <section id="enpc-root" class="enpc-panel" aria-hidden="true">
+                <header class="enpc-header">
+                    <strong>Encountered NPCs</strong>
+                    <button id="enpc-close" class="enpc-icon-btn" type="button" aria-label="Close">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </header>
+
+                <div class="enpc-toolbar">
+                    <input id="enpc-search" type="search" placeholder="Search characters…" autocomplete="off">
+                    <button id="enpc-add" type="button"><i class="fa-solid fa-plus"></i><span>Add</span></button>
+                    <button id="enpc-scan" type="button"><i class="fa-solid fa-magnifying-glass"></i><span>Scan Chat</span></button>
+                </div>
+
+                <div id="enpc-list" class="enpc-list"></div>
+                <div id="enpc-empty" class="enpc-empty">No characters saved for this chat.</div>
+            </section>
+
+            <div id="enpc-editor-backdrop" class="enpc-backdrop" hidden>
+                <form id="enpc-editor" class="enpc-modal">
+                    <header>
+                        <strong id="enpc-editor-title">Add Character</strong>
+                        <button class="enpc-icon-btn" data-close-editor type="button" aria-label="Close">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </header>
+
+                    <div class="enpc-form-grid">
+                        <label class="enpc-status-field">Status
+                            <input name="status" maxlength="12" placeholder="❤️">
+                        </label>
+                        <label class="enpc-name-field">Name
+                            <input name="name" required maxlength="100">
+                        </label>
+                        <label>Relationship
+                            <input name="relationship" maxlength="100" placeholder="Friend, rival, teacher…">
+                        </label>
+                        <label>Age
+                            <input name="age" maxlength="40" placeholder="Unknown">
+                        </label>
+                        <label>Sex
+                            <select name="sex">
+                                <option value="">Unknown</option>
+                                <option>Female</option>
+                                <option>Male</option>
+                                <option>Nonbinary</option>
+                                <option>Other</option>
+                            </select>
+                        </label>
+                        <label class="enpc-wide">Summary <span class="enpc-user-only">your input only</span>
+                            <textarea name="summary" rows="2" maxlength="500"></textarea>
+                        </label>
+                        <label class="enpc-wide">Notes <span class="enpc-user-only">your input only</span>
+                            <textarea name="notes" rows="5" maxlength="4000"></textarea>
+                        </label>
+                    </div>
+
+                    <footer>
+                        <button id="enpc-delete" class="enpc-danger" type="button">Delete</button>
+                        <span class="enpc-spacer"></span>
+                        <button data-close-editor type="button">Cancel</button>
+                        <button class="enpc-primary" type="submit">Save</button>
+                    </footer>
+                </form>
             </div>
-        </div>
-    `;
 
-    document.body.appendChild(overlay);
-    const close = () => overlay.remove();
+            <div id="enpc-scan-backdrop" class="enpc-backdrop" hidden>
+                <section id="enpc-scan-dialog" class="enpc-modal enpc-scan-modal">
+                    <header>
+                        <div>
+                            <strong>Scan Chat</strong>
+                            <small>Simple guesses from the chat currently loaded on screen.</small>
+                        </div>
+                        <button class="enpc-icon-btn" data-close-scan type="button" aria-label="Close">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </header>
+                    <div id="enpc-scan-results" class="enpc-scan-results"></div>
+                    <footer>
+                        <button data-close-scan type="button">Cancel</button>
+                        <button id="enpc-import" class="enpc-primary" type="button">Import Selected</button>
+                    </footer>
+                </section>
+            </div>
+        `);
 
-    overlay.querySelector('#enpc-scan-cancel').addEventListener('click', close);
-    overlay.addEventListener('mousedown', event => {
-        if (event.target === overlay) close();
-    });
+        panel = document.getElementById('enpc-root');
+        editor = document.getElementById('enpc-editor');
+        scanDialog = document.getElementById('enpc-scan-dialog');
 
-    overlay.querySelector('#enpc-scan-import').addEventListener('click', () => {
-        const selected = [...overlay.querySelectorAll('.enpc-scan-check:checked')]
-            .map(input => rows[Number(input.dataset.index)])
-            .filter(Boolean);
+        document.getElementById('enpc-open').addEventListener('click', openPanel);
+        document.getElementById('enpc-close').addEventListener('click', closePanel);
+        document.getElementById('enpc-add').addEventListener('click', () => openEditor());
+        document.getElementById('enpc-scan').addEventListener('click', scanChat);
+        document.getElementById('enpc-search').addEventListener('input', renderList);
+        editor.addEventListener('submit', saveEditor);
+        document.getElementById('enpc-delete').addEventListener('click', deleteSelected);
+        document.querySelectorAll('[data-close-editor]').forEach(x => x.addEventListener('click', closeEditor));
+        document.querySelectorAll('[data-close-scan]').forEach(x => x.addEventListener('click', closeScan));
+        document.getElementById('enpc-import').addEventListener('click', importSelected);
 
-        if (!selected.length) {
-            toastr.warning('Select at least one character.');
+        document.getElementById('enpc-editor-backdrop').addEventListener('click', e => {
+            if (e.target === e.currentTarget) closeEditor();
+        });
+        document.getElementById('enpc-scan-backdrop').addEventListener('click', e => {
+            if (e.target === e.currentTarget) closeScan();
+        });
+
+        subscribeToChatChanges();
+        renderList();
+    }
+
+    function openPanel() {
+        panel.classList.add('open');
+        panel.setAttribute('aria-hidden', 'false');
+        renderList();
+    }
+
+    function closePanel() {
+        panel.classList.remove('open');
+        panel.setAttribute('aria-hidden', 'true');
+    }
+
+    function renderList() {
+        if (!panel) return;
+        const query = (document.getElementById('enpc-search')?.value || '').trim().toLowerCase();
+        const characters = loadCharacters()
+            .filter(c => !query || [c.name, c.relationship, c.summary, c.notes, c.age, c.sex]
+                .some(v => String(v || '').toLowerCase().includes(query)))
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        const list = document.getElementById('enpc-list');
+        const empty = document.getElementById('enpc-empty');
+        empty.hidden = characters.length > 0;
+        list.innerHTML = characters.map(c => `
+            <button class="enpc-card" type="button" data-id="${escapeHtml(c.id)}">
+                <span class="enpc-status">${escapeHtml(c.status || '•')}</span>
+                <span class="enpc-card-main">
+                    <strong>${escapeHtml(c.name || 'Unnamed')}</strong>
+                    <small>${escapeHtml([c.relationship, c.sex, c.age].filter(Boolean).join(' · ') || 'No details')}</small>
+                    ${c.summary ? `<span class="enpc-summary">${escapeHtml(c.summary)}</span>` : ''}
+                </span>
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+        `).join('');
+
+        list.querySelectorAll('.enpc-card').forEach(card => {
+            card.addEventListener('click', () => openEditor(card.dataset.id));
+        });
+    }
+
+    function openEditor(id = null) {
+        selectedId = id;
+        const characters = loadCharacters();
+        const character = id ? characters.find(c => c.id === id) : emptyCharacter();
+
+        editor.reset();
+        for (const [key, value] of Object.entries(character || {})) {
+            if (editor.elements[key]) editor.elements[key].value = value ?? '';
+        }
+
+        document.getElementById('enpc-editor-title').textContent = id ? 'Edit Character' : 'Add Character';
+        document.getElementById('enpc-delete').hidden = !id;
+        document.getElementById('enpc-editor-backdrop').hidden = false;
+        setTimeout(() => editor.elements.name.focus(), 0);
+    }
+
+    function closeEditor() {
+        document.getElementById('enpc-editor-backdrop').hidden = true;
+        selectedId = null;
+    }
+
+    function saveEditor(event) {
+        event.preventDefault();
+        const form = new FormData(editor);
+        const characters = loadCharacters();
+        const existingIndex = selectedId ? characters.findIndex(c => c.id === selectedId) : -1;
+        const base = existingIndex >= 0 ? characters[existingIndex] : emptyCharacter();
+
+        const updated = normalizeCharacter({
+            ...base,
+            status: String(form.get('status') || '').trim(),
+            name: String(form.get('name') || '').trim(),
+            relationship: String(form.get('relationship') || '').trim(),
+            age: String(form.get('age') || '').trim(),
+            sex: String(form.get('sex') || '').trim(),
+            summary: String(form.get('summary') || '').trim(),
+            notes: String(form.get('notes') || '').trim(),
+        });
+
+        if (!updated.name) return;
+
+        if (existingIndex >= 0) characters[existingIndex] = updated;
+        else characters.push(updated);
+
+        saveCharacters(characters);
+        closeEditor();
+        renderList();
+        toast('success', 'Character saved.');
+    }
+
+    function deleteSelected() {
+        if (!selectedId) return;
+        if (!confirm('Delete this character?')) return;
+        const characters = loadCharacters().filter(c => c.id !== selectedId);
+        saveCharacters(characters);
+        closeEditor();
+        renderList();
+        toast('success', 'Character deleted.');
+    }
+
+    function getLoadedChatMessages() {
+        const ctx = context();
+        if (Array.isArray(ctx.chat) && ctx.chat.length) {
+            return ctx.chat.map((m, index) => ({
+                index,
+                speaker: String(m?.name || '').trim(),
+                text: String(m?.mes || m?.message || '').replace(/<[^>]*>/g, ' ').trim(),
+                isUser: Boolean(m?.is_user),
+            }));
+        }
+
+        return [...document.querySelectorAll('#chat .mes')].map((node, index) => ({
+            index,
+            speaker: (node.getAttribute('ch_name') || node.querySelector('.name_text')?.textContent || '').trim(),
+            text: (node.querySelector('.mes_text')?.textContent || '').trim(),
+            isUser: node.getAttribute('is_user') === 'true',
+        }));
+    }
+
+    function scanChat() {
+        const messages = getLoadedChatMessages();
+        if (!messages.length) {
+            toast('warning', 'No loaded chat messages were found.');
             return;
         }
 
-        let added = 0;
-        let updated = 0;
-        let skipped = 0;
+        const results = detectCharacters(messages);
+        renderScanResults(results);
+        document.getElementById('enpc-scan-backdrop').hidden = false;
+    }
 
-        for (const row of selected) {
-            const existing = findNpcByName(row.name);
+    function closeScan() {
+        document.getElementById('enpc-scan-backdrop').hidden = true;
+    }
 
-            if (existing) {
-                if (existing.locked) {
-                    skipped++;
-                    continue;
-                }
+    function detectCharacters(messages) {
+        const joined = messages.map(m => m.text).join('\n');
+        const current = loadCharacters();
+        const knownNames = new Set(current.map(c => c.name.toLowerCase()));
+        const candidates = new Map();
 
-                existing.status = row.status;
-                existing.relationship = row.relationship;
-                if (row.summary) existing.summary = row.summary;
-                existing.updatedAt = Date.now();
-                updated++;
-            } else {
-                data.npcs.push({
-                    id: makeId(),
-                    ...row,
-                    notes: '',
-                    locked: false,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                });
-                added++;
+        function addCandidate(name, source = 'text') {
+            name = cleanName(name);
+            if (!isLikelyName(name)) return;
+            const key = name.toLowerCase();
+            if (!candidates.has(key)) candidates.set(key, { name, mentions: 0, speaker: false });
+            const item = candidates.get(key);
+            item.mentions += 1;
+            if (source === 'speaker') item.speaker = true;
+        }
+
+        for (const message of messages) {
+            if (message.speaker && !message.isUser && !/^(assistant|system|narrator|you)$/i.test(message.speaker)) {
+                addCandidate(message.speaker, 'speaker');
+            }
+
+            const text = message.text;
+            const patterns = [
+                /\b(?:Mr|Mrs|Ms|Miss|Dr|Professor|Teacher|Captain|Lady|Lord|Prince|Princess|King|Queen|Emperor|Empress|Aunt|Uncle|Sister|Brother)\.?\s+([A-Z][A-Za-z'’-]{1,24}(?:\s+[A-Z][A-Za-z'’-]{1,24})?)/g,
+                /\b([A-Z][A-Za-z'’-]{2,24}(?:\s+[A-Z][A-Za-z'’-]{2,24})?)\s+(?:said|asked|replied|whispered|shouted|smiled|laughed|nodded|entered|looked|walked)\b/g,
+                /["“]([A-Z][A-Za-z'’-]{2,24})[,"”]/g,
+            ];
+
+            for (const pattern of patterns) {
+                let match;
+                while ((match = pattern.exec(text))) addCandidate(match[1]);
             }
         }
 
-        persistData();
-        render();
-        toastr.success(`Saved ${added} new and updated ${updated}${skipped ? `; skipped ${skipped} locked` : ''}.`);
-        close();
-    });
-}
-
-async function scanNpcs() {
-    if (scanRunning) return;
-    const button = document.querySelector('#enpc-scan');
-    scanRunning = true;
-    if (button) { button.disabled = true; button.textContent = 'Scanning chat…'; }
-    try {
-        const rows = localScanNpcs();
-        if (!rows.length) { toastr.info('No likely NPC names were found in the current chat. You can still add one manually.'); return; }
-        openScanReview(rows);
-    } catch (error) {
-        console.error('[Encountered NPCs] Local scan failed:', error);
-        toastr.error(`Local NPC scan failed: ${error.message}`);
-    } finally {
-        scanRunning = false;
-        if (button) { button.disabled = false; button.textContent = '🔍 Scan Chat'; }
+        return [...candidates.values()]
+            .filter(c => c.speaker || c.mentions >= 2)
+            .map(c => {
+                const profile = inferProfile(c.name, joined);
+                return {
+                    ...c,
+                    ...profile,
+                    exists: knownNames.has(c.name.toLowerCase()),
+                    selected: !knownNames.has(c.name.toLowerCase()),
+                };
+            })
+            .sort((a, b) => Number(b.speaker) - Number(a.speaker) || b.mentions - a.mentions || a.name.localeCompare(b.name))
+            .slice(0, 50);
     }
-}
 
-function makeDraggable(panel, handle) {
-    let drag = null;
+    function cleanName(name) {
+        return String(name || '')
+            .replace(/^[\s"'“”‘’.,:;!?()[\]{}]+|[\s"'“”‘’.,:;!?()[\]{}]+$/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
 
-    handle.addEventListener('pointerdown', event => {
-        if (event.button !== 0 || event.target.closest('button')) return;
+    function isLikelyName(name) {
+        if (!name || name.length < 2 || name.length > 50) return false;
+        if (/^(The|This|That|There|They|She|He|Her|His|My|Your|Our|Their|What|When|Where|Why|How|Yes|No|Unknown|User|Assistant|System|Narrator)$/i.test(name)) return false;
+        if (/^\d+$/.test(name)) return false;
+        return /^[\p{L}][\p{L}\p{M}'’\- ]+$/u.test(name);
+    }
 
-        const rect = panel.getBoundingClientRect();
-        drag = {
-            dx: event.clientX - rect.left,
-            dy: event.clientY - rect.top,
+    function inferProfile(name, fullText) {
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const windows = [];
+        const re = new RegExp(`.{0,180}\\b${escaped}\\b.{0,180}`, 'giu');
+        let match;
+        while ((match = re.exec(fullText)) && windows.length < 20) windows.push(match[0]);
+        const text = windows.join(' ');
+
+        let age = '';
+        const agePatterns = [
+            new RegExp(`\\b${escaped}\\b.{0,60}\\b(?:is|was|aged?)\\s+(\\d{1,3})\\b`, 'i'),
+            new RegExp(`\\b(\\d{1,3})[- ]year[- ]old\\b.{0,60}\\b${escaped}\\b`, 'i'),
+            new RegExp(`\\b${escaped}\\b.{0,60}\\b(\\d{1,3})[- ]year[- ]old\\b`, 'i'),
+        ];
+        for (const pattern of agePatterns) {
+            const ageMatch = text.match(pattern);
+            if (ageMatch) {
+                const n = Number(ageMatch[1]);
+                if (n >= 1 && n <= 999) age = String(n);
+                break;
+            }
+        }
+
+        let sex = '';
+        const maleScore = countMatches(text, /\b(he|him|his|man|boy|male|father|brother|son|husband|king|prince|uncle)\b/gi);
+        const femaleScore = countMatches(text, /\b(she|her|hers|woman|girl|female|mother|sister|daughter|wife|queen|princess|aunt)\b/gi);
+        if (femaleScore >= maleScore + 2) sex = 'Female';
+        else if (maleScore >= femaleScore + 2) sex = 'Male';
+
+        let relationship = '';
+        const relations = [
+            ['Childhood Friend', /\bchildhood friend\b/i],
+            ['Best Friend', /\bbest friend\b/i],
+            ['Friend', /\bfriend\b/i],
+            ['Rival', /\brival\b/i],
+            ['Enemy', /\b(enemy|foe|antagonist)\b/i],
+            ['Teacher', /\b(teacher|professor|instructor|mentor)\b/i],
+            ['Boss', /\b(boss|manager|supervisor)\b/i],
+            ['Coworker', /\b(coworker|colleague)\b/i],
+            ['Classmate', /\bclassmate\b/i],
+            ['Sister', /\bsister\b/i],
+            ['Brother', /\bbrother\b/i],
+            ['Mother', /\bmother\b/i],
+            ['Father', /\bfather\b/i],
+            ['Aunt', /\baunt\b/i],
+            ['Uncle', /\buncle\b/i],
+            ['Cousin', /\bcousin\b/i],
+            ['Daughter', /\bdaughter\b/i],
+            ['Son', /\bson\b/i],
+            ['Wife', /\bwife\b/i],
+            ['Husband', /\bhusband\b/i],
+            ['Fiancée', /\bfianc(?:e|ée)\b/i],
+            ['Girlfriend', /\bgirlfriend\b/i],
+            ['Boyfriend', /\bboyfriend\b/i],
+            ['Stranger', /\bstranger\b/i],
+        ];
+        for (const [label, pattern] of relations) {
+            if (pattern.test(text)) {
+                relationship = label;
+                break;
+            }
+        }
+
+        return { relationship, age, sex };
+    }
+
+    function countMatches(text, pattern) {
+        return (text.match(pattern) || []).length;
+    }
+
+    function renderScanResults(results) {
+        const container = document.getElementById('enpc-scan-results');
+        if (!results.length) {
+            container.innerHTML = `<div class="enpc-empty">No likely character names were found. Add characters manually or load more chat messages.</div>`;
+            document.getElementById('enpc-import').disabled = true;
+            return;
+        }
+
+        document.getElementById('enpc-import').disabled = false;
+        container.innerHTML = results.map((r, index) => `
+            <label class="enpc-scan-item ${r.exists ? 'exists' : ''}">
+                <input type="checkbox" data-scan-index="${index}" ${r.selected ? 'checked' : ''} ${r.exists ? 'disabled' : ''}>
+                <span>
+                    <strong>${escapeHtml(r.name)}</strong>
+                    <small>${escapeHtml([
+                        r.relationship || 'Relationship unknown',
+                        r.sex || 'Sex unknown',
+                        r.age ? `Age ${r.age}` : 'Age unknown'
+                    ].join(' · '))}</small>
+                    <em>${r.exists ? 'Already saved' : `${r.mentions} mention${r.mentions === 1 ? '' : 's'}`}</em>
+                </span>
+            </label>
+        `).join('');
+
+        container.dataset.results = JSON.stringify(results);
+    }
+
+    function importSelected() {
+        const container = document.getElementById('enpc-scan-results');
+        const results = JSON.parse(container.dataset.results || '[]');
+        const checked = [...container.querySelectorAll('input[type="checkbox"]:checked')]
+            .map(box => results[Number(box.dataset.scanIndex)])
+            .filter(Boolean);
+
+        if (!checked.length) {
+            toast('warning', 'Select at least one character.');
+            return;
+        }
+
+        const characters = loadCharacters();
+        const existing = new Set(characters.map(c => c.name.toLowerCase()));
+
+        for (const result of checked) {
+            if (existing.has(result.name.toLowerCase())) continue;
+            characters.push({
+                ...emptyCharacter(),
+                name: result.name,
+                relationship: result.relationship || '',
+                age: result.age || '',
+                sex: result.sex || '',
+                summary: '',
+                notes: '',
+                status: '',
+            });
+            existing.add(result.name.toLowerCase());
+        }
+
+        saveCharacters(characters);
+        closeScan();
+        renderList();
+        toast('success', `Imported ${checked.length} character${checked.length === 1 ? '' : 's'}.`);
+    }
+
+    function subscribeToChatChanges() {
+        const ctx = context();
+        const source = ctx.eventSource;
+        const types = ctx.event_types;
+        if (!source || !types) return;
+
+        const rerender = () => {
+            if (panel?.classList.contains('open')) renderList();
         };
 
-        handle.setPointerCapture(event.pointerId);
-        panel.classList.add('enpc-moving');
-        event.preventDefault();
-    });
-
-    handle.addEventListener('pointermove', event => {
-        if (!drag) return;
-
-        const maxX = Math.max(0, window.innerWidth - panel.offsetWidth);
-        const maxY = Math.max(0, window.innerHeight - 44);
-
-        panel.style.left = `${Math.min(maxX, Math.max(0, event.clientX - drag.dx))}px`;
-        panel.style.top = `${Math.min(maxY, Math.max(0, event.clientY - drag.dy))}px`;
-        panel.style.right = 'auto';
-    });
-
-    const stop = event => {
-        if (!drag) return;
-        drag = null;
-        panel.classList.remove('enpc-moving');
-
-        const rect = panel.getBoundingClientRect();
-        const settings = loadSettings();
-        settings.x = Math.round(rect.left);
-        settings.y = Math.round(rect.top);
-        settings.width = Math.round(rect.width);
-        settings.height = Math.round(rect.height);
-        saveSettings(settings);
-
-        try {
-            handle.releasePointerCapture(event.pointerId);
-        } catch {}
-    };
-
-    handle.addEventListener('pointerup', stop);
-    handle.addEventListener('pointercancel', stop);
-}
-
-function observeSize(panel) {
-    const observer = new ResizeObserver(() => {
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-            const rect = panel.getBoundingClientRect();
-            if (rect.width < 100 || rect.height < 80) return;
-
-            const settings = loadSettings();
-            settings.width = Math.round(rect.width);
-            settings.height = Math.round(rect.height);
-            saveSettings(settings);
-        }, 200);
-    });
-
-    observer.observe(panel);
-}
-
-function buildPanel() {
-    if (document.querySelector('#enpc-panel')) return;
-
-    const settings = loadSettings();
-    const panel = document.createElement('aside');
-    panel.id = 'enpc-panel';
-    panel.className = settings.panelOpen ? '' : 'enpc-collapsed';
-    panel.style.width = `${Math.max(500, settings.width)}px`;
-    panel.style.height = `${Math.max(260, settings.height)}px`;
-    panel.style.top = `${Math.max(0, settings.y)}px`;
-
-    if (Number.isFinite(settings.x)) {
-        panel.style.left = `${Math.max(0, settings.x)}px`;
-        panel.style.right = 'auto';
+        for (const eventName of ['CHAT_CHANGED', 'GROUP_UPDATED', 'CHARACTER_DELETED']) {
+            if (types[eventName]) source.on(types[eventName], rerender);
+        }
     }
 
-    panel.innerHTML = `
-        <div id="enpc-drag-handle" class="enpc-header" title="Drag to move">
-            <button id="enpc-collapse" type="button" title="Collapse">☰</button>
-            <strong>Characters</strong>
-            <span id="enpc-count">0</span>
-            <button id="enpc-add" type="button" title="Add character">＋</button>
-        </div>
+    function init() {
+        createUi();
+        console.log('[Encountered NPCs] v2.2.0 loaded');
+    }
 
-        <div class="enpc-body">
-            <div class="enpc-toolbar">
-                <button id="enpc-scan" type="button" class="menu_button">🔍 Scan Chat</button>
-                <input id="enpc-search" type="search" placeholder="Search name, relationship, summary, or notes…">
-            </div>
+    return { init };
+})();
 
-            <div class="enpc-columns">
-                <span>Status</span>
-                <span>Name</span>
-                <span>Relationship</span>
-                <span>Summary</span>
-                <span></span>
-            </div>
-
-            <div id="enpc-list"></div>
-
-            <div class="enpc-footer">
-                <button id="enpc-reset-position" type="button" class="menu_button" title="Reset panel position and size">Reset panel</button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(panel);
-
-    makeDraggable(panel, panel.querySelector('#enpc-drag-handle'));
-    observeSize(panel);
-
-    panel.querySelector('#enpc-collapse').addEventListener('click', () => {
-        panel.classList.toggle('enpc-collapsed');
-        const next = loadSettings();
-        next.panelOpen = !panel.classList.contains('enpc-collapsed');
-        saveSettings(next);
-    });
-
-    panel.querySelector('#enpc-add').addEventListener('click', () => openEditor());
-    panel.querySelector('#enpc-scan').addEventListener('click', scanNpcs);
-    panel.querySelector('#enpc-search').addEventListener('input', render);
-
-    panel.querySelector('#enpc-reset-position').addEventListener('click', () => {
-        const next = { ...DEFAULT_SETTINGS };
-        saveSettings(next);
-
-        panel.classList.remove('enpc-collapsed');
-        panel.style.left = 'auto';
-        panel.style.right = '10px';
-        panel.style.top = `${DEFAULT_SETTINGS.y}px`;
-        panel.style.width = `${DEFAULT_SETTINGS.width}px`;
-        panel.style.height = `${DEFAULT_SETTINGS.height}px`;
-
-        render();
-    });
+function startEncounteredNpcs() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => ENPC.init(), { once: true });
+    } else {
+        ENPC.init();
+    }
 }
 
-function switchChat() {
-    const nextKey = getChatKey();
-    if (nextKey === currentChatKey) return;
-
-    currentChatKey = nextKey;
-    data = loadData();
-    render();
-}
-
-function initialize() {
-    currentChatKey = getChatKey();
-    data = loadData();
-    buildPanel();
-    render();
-
-    const c = context();
-    c.eventSource.on(c.event_types.CHAT_CHANGED, () => {
-        currentChatKey = '';
-        setTimeout(switchChat, 50);
-    });
-
-    console.log(`[Encountered NPCs] v${VERSION} loaded`);
-}
-
-const c = context();
-c.eventSource.on(c.event_types.APP_READY, initialize);
+startEncounteredNpcs();

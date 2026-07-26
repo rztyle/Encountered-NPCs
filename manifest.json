@@ -1,10 +1,10 @@
 {
   "display_name": "Encountered NPCs",
-  "loading_order": 50,
+  "loading_order": 10,
   "js": "index.js",
   "css": "style.css",
   "author": "rztyle",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "homePage": "https://github.com/rztyle/Encountered-NPCs",
   "auto_update": true,
   "minimum_client_version": "1.12.0"
